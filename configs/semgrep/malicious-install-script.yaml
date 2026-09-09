@@ -1,0 +1,39 @@
+# Правило под конкретную угрозу: установочный скрипт пакета читает токен сервисной
+# учётки из окружения и уносит его наружу.
+#
+# ЧИТАТЬ КАК ПРИМЕР, А НЕ КАК ГОТОВУЮ ЗАЩИТУ. Стоковые наборы правил Semgrep на нашем
+# бэкдоре дали ноль; сработало только это правило — и оно, по сути, grep по именам,
+# которые мы сами же и заложили в нагрузку. Настоящий злоумышленник назовёт переменную
+# иначе. Ценность файла в форме: вот так выглядит правило, написанное под свою угрозу.
+#
+# Подставьте сюда имена СВОИХ переменных с токенами и СВОИ заголовки авторизации.
+rules:
+  - id: install-script-ci-token-exfil
+    languages: [javascript]
+    severity: ERROR
+    message: >
+      Установочный скрипт пакета читает токен сервисной учётки из окружения и
+      отправляет его в HTTP-запросе. Это кража идентичности в цепочке поставок
+      (OWASP ASI04) — зависимость нужно отклонить.
+    metadata:
+      owasp: ASI04
+      references:
+        - https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
+    patterns:
+      - pattern-either:
+          - pattern: process.env.CI_JOB_TOKEN
+          - pattern: process.env.REPLACE_WITH_YOUR_SERVICE_TOKEN_VAR
+      - pattern-inside: |
+          $REQ = { ..., "PRIVATE-TOKEN": $T, ... };
+          ...
+
+  - id: install-script-network-beacon
+    languages: [javascript]
+    severity: WARNING
+    message: >
+      Установочный скрипт делает исходящий сетевой вызов. Сам по себе это не приговор,
+      но на этапе install его быть не должно — смотреть вручную.
+    patterns:
+      - pattern-either:
+          - pattern: $H.get("http://...", ...)
+          - pattern: $H.request($U, ...)

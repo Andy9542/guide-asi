@@ -1,0 +1,31 @@
+# Политика авторизации САМОГО сервера OPA — не путать с решаемой политикой в policy.rego.
+#
+# Зачем она нужна. OPA по умолчанию поднимается без `--authentication` и `--authorization`,
+# то есть `PUT /v1/policies` и `PUT /v1/data` открыты всем, кто дотягивается до порта, —
+# включая того самого агента, которого OPA гейтит. Агент, переписавший политику, гейтит
+# сам себя. Контроль, подсудный подконтрольному, контролем не является.
+#
+# При `--authorization=basic` OPA спрашивает ровно `data.system.authz.allow`, и умолчание
+# «запрещено» здесь не декоративное: без явного правила ниже не пройдёт ни один запрос.
+#
+# Запускать так:
+#   opa run --server \
+#     --authentication=token --authorization=basic \
+#     /policy/policy.rego /policy/authz.rego
+package system.authz
+
+default allow := false
+
+# Токен агента: ровно одно действие — спросить решение. Ни чтения других данных,
+# ни записи политик, ни записи данных.
+allow if {
+	input.identity == "REPLACE_WITH_YOUR_AGENT_TOKEN"
+	input.method == "POST"
+	input.path == ["v1", "data", "agent", "tools", "allow"]
+}
+
+# Health-ручка остаётся открытой без токена: её опрашивает оркестрация, и закрывать её
+# означало бы сделать «сервис жив» неотличимым от «сервис не пускает».
+allow if {
+	input.path == ["health"]
+}

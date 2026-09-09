@@ -1,0 +1,35 @@
+# Сбор решений контроля. Смысл файла — не «настроить коллектор», а получить место,
+# где решение каждого контроля остаётся машиночитаемым следом.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp/jaeger:
+    endpoint: trace-viewer:4317
+    tls:
+      insecure: true
+
+  # Долговременный сток, переживающий перезапуск. append: true — не обрезать файл при
+  # рестарте коллектора: без данных прошлых прогонов сравнить «до» и «после» не с чем.
+  file:
+    path: /telemetry/spans/spans.jsonl
+    append: true
+
+  debug:
+    verbosity: basic
+
+processors:
+  batch:
+    timeout: 5s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, file, debug]

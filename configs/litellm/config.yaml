@@ -1,0 +1,34 @@
+# Шлюз вызовов модели: единственная точка, через которую агенты ходят к провайдеру.
+#
+# Настоящий ключ провайдера живёт ТОЛЬКО здесь. Агенты получают виртуальные ключи своей
+# роли (sk-virtual-<роль>) и обращаются к модели по алиасу, а не по имени провайдера, —
+# поэтому смена модели остаётся правкой конфига и не превращается в правку кода агентов.
+model_list:
+  - model_name: chat                       # алиас, который знают агенты
+    litellm_params:
+      model: REPLACE_WITH_PROVIDER/MODEL   # например openai/gpt-4.1 или deepseek/deepseek-chat
+      api_base: os.environ/CHAT_API_BASE
+      api_key: os.environ/CHAT_API_KEY     # только ссылка на переменную, не значение
+
+  - model_name: chat-fallback
+    litellm_params:
+      model: REPLACE_WITH_SECOND_PROVIDER/MODEL
+      api_base: os.environ/FALLBACK_API_BASE
+      api_key: os.environ/FALLBACK_API_KEY
+
+  - model_name: embeddings
+    litellm_params:
+      model: REPLACE_WITH_EMBEDDING_MODEL
+      api_key: os.environ/EMBEDDINGS_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
+
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  request_timeout: 120
+  # Прозрачный переход на запасного при ошибке основного. Прозрачный — значит виден
+  # в логах: молчаливая подмена модели однажды объяснит вам необъяснимую смену поведения.
+  fallbacks: [{"chat": ["chat-fallback"]}]
