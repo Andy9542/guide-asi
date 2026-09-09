@@ -1,0 +1,26 @@
+tool,repo,point,risks,label,spdx,osi,license_note,stars,last_commit,created,archived,checked
+BerriAI/litellm,https://github.com/BerriAI/litellm,01-llm-gateway,ASI03 ASI08,стенд,MIT,да,"MIT, кроме каталога enterprise/ — там отдельная коммерческая лицензия",58358,2026-09-09,2023-07-27,нет,2026-09-09
+open-policy-agent/opa,https://github.com/open-policy-agent/opa,02-tool-gateway,ASI02 ASI03 ASI10,стенд,Apache-2.0,да,,12220,2026-09-09,2015-12-28,нет,2026-09-09
+agentgateway/agentgateway,https://github.com/agentgateway/agentgateway,02-tool-gateway,ASI02 ASI03 ASI07 ASI08,дока,Apache-2.0,да,"проект Linux Foundation, дата-плейн kgateway (CNCF Sandbox); CRD пока v1alpha1",4775,2026-09-09,2025-03-18,нет,2026-09-09
+luckyPipewrench/pipelock,https://github.com/luckyPipewrench/pipelock,02-tool-gateway,ASI01 ASI02 ASI04 ASI09,дока,Apache-2.0,да,"Apache-2.0 только у ядра из исходников; готовые релизные бинарники содержат платный код, включаемый ключом",839,2026-09-09,2026-02-08,нет,2026-09-09
+meta-llama/PurpleLlama,https://github.com/meta-llama/PurpleLlama,02-tool-gateway,ASI01 ASI06 ASI09,дока,MIT,да,"MIT у кода LlamaFirewall; корень репозитория и модели PromptGuard/Llama Guard — под Llama Community License, это не OSI",4386,2026-08-18,2023-12-06,нет,2026-09-09
+NVIDIA-NeMo/Guardrails,https://github.com/NVIDIA-NeMo/Guardrails,02-tool-gateway,ASI01 ASI06 ASI09,дока,Apache-2.0,да,,7089,2026-09-09,2023-04-18,нет,2026-09-09
+guardrails-ai/guardrails,https://github.com/guardrails-ai/guardrails,02-tool-gateway,ASI01 ASI02 ASI06,дока,Apache-2.0,да,,7371,2026-09-08,2023-01-29,нет,2026-09-09
+data-privacy-stack/presidio,https://github.com/data-privacy-stack/presidio,02-tool-gateway,ASI09,дока,MIT,да,репозиторий переехал из microsoft/presidio — старые ссылки редиректят,10790,2026-09-08,2018-05-04,нет,2026-09-09
+semgrep/semgrep,https://github.com/semgrep/semgrep,03-supply-chain,ASI04 ASI05,стенд,LGPL-2.1,да,"копилефт: правила свои, но изменения в самом Semgrep придётся отдать обратно",16555,2026-09-04,2019-12-13,нет,2026-09-09
+google/osv-scanner,https://github.com/google/osv-scanner,03-supply-chain,ASI04,стенд,Apache-2.0,да,,10998,2026-09-09,2022-11-14,нет,2026-09-09
+snyk/agent-scan,https://github.com/snyk/agent-scan,03-supply-chain,ASI01 ASI02 ASI04 ASI07,дока,Apache-2.0,да,,3023,2026-09-09,2025-04-07,нет,2026-09-09
+e2b-dev/E2B,https://github.com/e2b-dev/E2B,04-sandbox,ASI02 ASI03 ASI05,дока,Apache-2.0,да,,13718,2026-09-09,2023-03-04,нет,2026-09-09
+kubernetes-sigs/agent-sandbox,https://github.com/kubernetes-sigs/agent-sandbox,04-sandbox,ASI05,дока,Apache-2.0,да,"SIG-проект Kubernetes, в каталоге помечен как experimental — берём как кандидата, не как основу",3787,2026-09-08,2025-08-12,нет,2026-09-09
+google/gvisor,https://github.com/google/gvisor,04-sandbox,ASI05,дока,Apache-2.0,да,рантайм под песочницей; у нас не стартовал на arm64 с 16K-страницами,19259,2026-09-09,2018-04-26,нет,2026-09-09
+microsoft/agent-governance-toolkit,https://github.com/microsoft/agent-governance-toolkit,05-identity,ASI03 ASI07 ASI10,дока,MIT,да,,6227,2026-09-08,2026-03-02,нет,2026-09-09
+authzed/spicedb,https://github.com/authzed/spicedb,05-identity,ASI02 ASI03 ASI10,дока,Apache-2.0,да,,7034,2026-09-07,2021-08-16,нет,2026-09-09
+OWASP/www-project-agent-memory-guard,https://github.com/OWASP/www-project-agent-memory-guard,06-memory,ASI06,дока,Apache-2.0,да,"до 1.0; сам себя называет первым слоем, а не полной защитой",170,2026-09-09,2026-02-16,нет,2026-09-09
+promptfoo/promptfoo,https://github.com/promptfoo/promptfoo,07-observability,ASI01 ASI06,стенд,MIT,да,,24967,2026-09-09,2023-04-28,нет,2026-09-09
+NVIDIA/garak,https://github.com/NVIDIA/garak,07-observability,ASI01 ASI06,дока,Apache-2.0,да,,9150,2026-09-04,2023-05-10,нет,2026-09-09
+microsoft/PyRIT,https://github.com/microsoft/PyRIT,07-observability,ASI01 ASI06,дока,MIT,да,,4432,2026-09-09,2023-12-12,нет,2026-09-09
+ethz-spylab/agentdojo,https://github.com/ethz-spylab/agentdojo,07-observability,ASI01 ASI02,дока,MIT,да,,809,2026-06-02,2024-02-29,нет,2026-09-09
+UKGovernmentBEIS/inspect_ai,https://github.com/UKGovernmentBEIS/inspect_ai,07-observability,ASI01 ASI02,дока,MIT,да,,2735,2026-09-09,2023-11-14,нет,2026-09-09
+traceloop/openllmetry,https://github.com/traceloop/openllmetry,07-observability,ASI08 ASI10,дока,Apache-2.0,да,,7423,2026-08-10,2023-09-02,нет,2026-09-09
+AgentOps-AI/agentops,https://github.com/AgentOps-AI/agentops,07-observability,ASI08 ASI10,дока,MIT,да,,5813,2026-06-25,2023-08-15,нет,2026-09-09
+Arize-ai/phoenix,https://github.com/Arize-ai/phoenix,07-observability,ASI08 ASI09 ASI10,дока,Elastic-2.0,НЕТ,Elastic License 2.0 — не OSI: запрещает предоставлять продукт как управляемый сервис,11388,2026-09-09,2022-11-09,нет,2026-09-09

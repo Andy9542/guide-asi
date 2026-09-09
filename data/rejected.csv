@@ -1,0 +1,9 @@
+tool,repo,reason,stars,last_commit,archived,checked
+protectai/llm-guard,https://github.com/protectai/llm-guard,репозиторий архивирован — правки в него больше не принимают,3204,2026-07-08,да,2026-09-09
+protectai/modelscan,https://github.com/protectai/modelscan,"последний коммит 18.02.2026, больше полугода без изменений",773,2026-02-18,нет,2026-09-09
+anthropics/claude-code-security-review,https://github.com/anthropics/claude-code-security-review,"последний коммит 11.02.2026, больше полугода без изменений",6189,2026-02-11,нет,2026-09-09
+sattyamjjain/agent-airlock,https://github.com/sattyamjjain/agent-airlock,"13 звёзд: эксплуатации, по которой можно судить о зрелости, нет",13,2026-09-08,нет,2026-09-09
+Agentic-AI-Risk-Mitigation/Janus,https://github.com/Agentic-AI-Risk-Mitigation/Janus,16 звёзд: то же самое,16,2026-08-31,нет,2026-09-09
+Justin0504/Aegis,https://github.com/Justin0504/Aegis,"создан в марте 2026, 340 звёзд — молодой, держим в поле зрения",340,2026-09-06,нет,2026-09-09
+GoPlusSecurity/agentguard,https://github.com/GoPlusSecurity/agentguard,"создан в феврале 2026, 459 звёзд — молодой, держим в поле зрения",459,2026-09-04,нет,2026-09-09
+OpenHands/OpenHands,https://github.com/OpenHands/OpenHands,"это агентская платформа, а не средство защиты; в каталог попал по кластеру песочниц",87014,2026-09-09,нет,2026-09-09
