@@ -11,32 +11,32 @@
 Зачем отдельный классификатор. promptfoo возвращает ненулевой код при любом провале
 проверок — и так же завершается падение самого инструмента, ошибка конфига, нехватка
 памяти. Приняв код процесса за исход, вы обвините модель в чужой поломке.
+
+Правило разделения одно: **INFRA — это отсутствие вердикта, а не наличие ошибки.**
+Первая редакция искала непустое поле `error` где угодно в дереве результата и объявляла
+находку инфраструктурной. Но promptfoo кладёт в `error` в том числе текст ПРОВАЛЕННОЙ
+проверки — то есть настоящий провал пробы (модель поддалась) уезжал в «не смогли
+измерить». Ошибка в опасную сторону: реальный провал защиты выглядел как сбой стенда.
+Поэтому смотрим не на наличие текста ошибки, а на наличие явного булева вердикта у
+каждого теста.
 """
 import json
 import sys
-
-
-def errors(node):
-    """Все непустые поля `error` в дереве результата.
-
-    Признак — НАЛИЧИЕ поля, а не словарь известных формулировок. Словарь подстрок
-    («429», «quota», «ECONNREFUSED») всегда неполон и ошибается в опасную сторону:
-    незнакомый сбой провайдера он объявляет провалом модели.
-    """
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "error" and isinstance(value, str) and value.strip():
-                yield value
-            yield from errors(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from errors(value)
 
 
 def infra(message):
     print(f"redteam: {message}", file=sys.stderr)
     print("REDTEAM_VERDICT=infra")
     raise SystemExit(3)
+
+
+def verdict_of(result):
+    """Явный булев вердикт теста или None, если его нет."""
+    grading = result.get("gradingResult") or {}
+    value = grading.get("pass")
+    if value is None:
+        value = result.get("success")
+    return value if isinstance(value, bool) else None
 
 
 def main():
@@ -46,10 +46,6 @@ def main():
     except Exception as exc:
         infra(f"вывод promptfoo не прочитан ({type(exc).__name__}) — судить нечем")
 
-    hits = list(errors(blob))
-    if hits:
-        infra(f"набор НЕ ВЫПОЛНЕН ({len(hits)} тест(ов) с ошибкой) — {hits[0][:140]}")
-
     results = (blob.get("results") or {}).get("results") or []
     expected = len((blob.get("config") or {}).get("tests") or [])
 
@@ -58,27 +54,31 @@ def main():
         infra(f"выполнено {len(results)} тест(ов) из {expected} — вердикт по части набора не выносится")
 
     # Кэш. Кэшированный ответ модели — тот же мок: вердикт о стойкости, вынесенный по
-    # записи суточной давности, ничего не проверяет.
+    # записи двухнедельной давности, ничего не проверяет. run.sh передаёт --no-cache,
+    # но проверка остаётся: она дешевле, чем доверие к тому, что флаг не потеряют.
     cached = [i for i, r in enumerate(results) if (r.get("response") or {}).get("cached")]
     if cached:
         infra(f"{len(cached)} из {len(results)} ответ(ов) взяты ИЗ КЭША — свежего замера не было "
               "(сбросить: rm -rf ~/.promptfoo/cache)")
 
-    verdicts = []
-    for r in results:
-        grading = r.get("gradingResult") or {}
-        verdict = grading.get("pass")
-        if verdict is None:
-            verdict = r.get("success")
-        verdicts.append(verdict)
-
-    if [v for v in verdicts if not isinstance(v, bool)]:
-        infra("не у всех тестов есть явный вердикт — судить нечем")
+    verdicts = [verdict_of(r) for r in results]
+    missing = [i for i, v in enumerate(verdicts) if v is None]
+    if missing:
+        # Тексты ошибок печатаем только здесь — как диагностику того, ПОЧЕМУ вердикта
+        # нет, а не как признак, по которому исход определяется.
+        why = []
+        for i in missing:
+            err = results[i].get("error")
+            why.append(f"#{i}: {str(err)[:120]}" if err else f"#{i}: без пояснения")
+        infra(f"у {len(missing)} из {len(verdicts)} тест(ов) нет явного вердикта — судить нечем; "
+              + "; ".join(why))
 
     # Код процесса — сверка, а не решение. Расхождение означает, что доверять нельзя
     # ни одному из двух источников.
     # Замерено на promptfoo 0.122.1: всё прошло → 0, провал проверок → 100, ошибка → 1.
-    # Всё, чего нет в этом перечне, — необъяснённый исход, то есть INFRA.
+    # Версия намеренно не закреплена в run.sh, а перечень кодов закрыт: любой код вне
+    # перечня даёт INFRA. Смена версии деградирует в «не смогли измерить», а не в
+    # ложное утверждение о модели.
     ok_code, failed_codes = 0, (100,)
     try:
         process_code = int(sys.argv[2])

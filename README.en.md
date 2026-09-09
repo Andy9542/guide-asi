@@ -33,13 +33,13 @@ Every claim carries exactly one.
 
 | Point | Risks | Tools |
 |---|---|---|
-| [01 · Model call gateway](points/01-llm-gateway.md) | ASI03, ASI08 | LiteLLM |
-| [02 · Tool and MCP gateway](points/02-tool-gateway.md) | ASI01, ASI02, ASI03, ASI09 | OPA, agentgateway, Pipelock, LlamaFirewall, NeMo Guardrails, Guardrails AI, Presidio |
-| [03 · Agent supply chain](points/03-supply-chain.md) | ASI04, ASI05 | Semgrep, OSV-Scanner, snyk/agent-scan |
-| [04 · Execution sandbox](points/04-sandbox.md) | ASI02, ASI03, ASI05 | E2B, kubernetes-sigs/agent-sandbox, gVisor |
-| [05 · Agent identity and bus](points/05-identity.md) | ASI03, ASI07, ASI10 | Ed25519 message signing, Agent Governance Toolkit, SpiceDB |
-| [06 · Memory and RAG](points/06-memory.md) | ASI06 | **gap** · OWASP Agent Memory Guard as a candidate |
-| [07 · Control telemetry and red-team](points/07-observability.md) | ASI08, ASI10 — detection only | Decision-span contract, promptfoo, garak, PyRIT, AgentDojo, Inspect, OpenLLMetry |
+| [01 · Model call gateway](points/01-llm-gateway.md) | ASI03, ASI08 | LiteLLM `[стенд]` |
+| [02 · Tool and MCP gateway](points/02-tool-gateway.md) | ASI01, ASI02, ASI03, ASI09 | OPA `[стенд]` · agentgateway, Pipelock, LlamaFirewall, NeMo Guardrails, Guardrails AI, Presidio `[дока]` |
+| [03 · Agent supply chain](points/03-supply-chain.md) | ASI04, ASI05 | Semgrep, OSV-Scanner `[стенд]` · snyk/agent-scan `[дока]` |
+| [04 · Execution sandbox](points/04-sandbox.md) | ASI02, ASI03, ASI05 | E2B, kubernetes-sigs/agent-sandbox, gVisor `[дока]` |
+| [05 · Agent identity and bus](points/05-identity.md) | ASI03, ASI07, ASI10 | Ed25519 message signing `[стенд]` · Agent Governance Toolkit, SpiceDB `[дока]` |
+| [06 · Memory and RAG](points/06-memory.md) | ASI06 | `[пробел]` · OWASP Agent Memory Guard as a candidate `[дока]` |
+| [07 · Control telemetry and red-team](points/07-observability.md) | ASI08, ASI10 — detection only | Decision-span contract, promptfoo `[стенд]` · garak, PyRIT, AgentDojo, Inspect, OpenLLMetry `[дока]` |
 
 Point 07 is a **measurement, not a defense**. It does not stop an attack; it answers whether
 the controls in points 01–06 fired at all. Without it, "no incident" and "the defense worked"

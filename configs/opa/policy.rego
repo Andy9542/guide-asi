@@ -11,6 +11,16 @@ package agent.tools
 default allow := false
 
 allow if {
-	input.path != ".mcp.json"
-	not endswith(input.path, "/.mcp.json")
+	# is_string обязателен. Без него нестроковый input.path (число, null, объект)
+	# роняет endswith в ошибку типа, OPA без --strict-builtin-errors превращает её
+	# в undefined, `not undefined` истинно — и правило РАЗРЕШАЕТ запись. Проверка типа
+	# возвращает такой запрос в общее умолчание «запрещено».
+	is_string(input.path)
+
+	# Сравнение в нижнем регистре: на macOS и Windows файловые системы по умолчанию
+	# регистронезависимы, и запись в `.MCP.json` перезаписала бы тот самый `.mcp.json`,
+	# который эта политика защищает.
+	p := lower(input.path)
+	p != ".mcp.json"
+	not endswith(p, "/.mcp.json")
 }

@@ -11,7 +11,11 @@ OUT="${REDTEAM_JSON:-$HERE/results.json}"
 
 rm -f "$OUT" 2>/dev/null || :
 
-npx -y promptfoo@latest eval -c "$HERE/promptfooconfig.yaml" --no-progress-bar -o "$OUT"
+# --no-cache обязателен. Кэш promptfoo включён по умолчанию (диск, ~/.promptfoo/cache,
+# срок жизни две недели): без флага первый прогон меряет, а каждый следующий две
+# недели отдаёт запись — и классификатор честно объявляет это INFRA. Обвязка,
+# работающая один раз в две недели, бесполезна в CI.
+npx -y promptfoo@latest eval -c "$HERE/promptfooconfig.yaml" --no-cache --no-progress-bar -o "$OUT"
 rc=$?
 
 # Классификатор зовётся ВСЕГДА, в том числе при rc=0: ранний выход пропускал бы проверку

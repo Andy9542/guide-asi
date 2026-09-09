@@ -40,7 +40,7 @@
 | [garak](https://github.com/NVIDIA/garak) `[дока]` | Apache-2.0 | Сканер пробников по классам атак на LLM |
 | [PyRIT](https://github.com/microsoft/PyRIT) `[дока]` | MIT | Фреймворк автоматизации red-team |
 | [AgentDojo](https://github.com/ethz-spylab/agentdojo) `[дока]` | MIT | Бенчмарк устойчивости агента к инъекциям |
-| [Inspect](https://github.com/UKGovernmentBEIS/inspect_ai) `[дока]` | MIT | Оценочный фреймворк UK AI Safety Institute |
+| [Inspect](https://github.com/UKGovernmentBEIS/inspect_ai) `[дока]` | MIT | Оценочный фреймворк UK AI Security Institute (до февраля 2025 — AI Safety Institute) |
 
 **Это измерители, а не защита.** Ни один из них не стоит на пути атаки. Они говорят, насколько
 плохо всё сейчас, — и это ровно то, ради чего их ставят.

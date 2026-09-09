@@ -31,7 +31,7 @@ A→B, SSRF через HTTP-инструмент. Ничего не «взлом
 |---|---|---|
 | [02 · Шлюз инструментов](../points/02-tool-gateway.md) | OPA — политика на вызов | `[стенд]` |
 | [02 · Прокси](../points/02-tool-gateway.md#слой-2--прокси-на-трафик-инструментов) | agentgateway, Pipelock | `[дока]` |
-| [04 · Песочница](../points/04-sandbox.md) | E2B, agent-sandbox | `[дока]` |
+| [04 · Песочница](../points/04-sandbox.md) | E2B, kubernetes-sigs/agent-sandbox, gVisor как рантайм | `[дока]` |
 | [05 · Права](../points/05-identity.md) | SpiceDB — права под задачу, а не под роль | `[дока]` |
 
 ## Чего это не закрывает

@@ -4,8 +4,17 @@
 
 ## Текст гайда — CC BY-SA 4.0
 
-Всё, кроме `configs/`, распространяется под [Creative Commons Attribution-ShareAlike 4.0
-International](https://creativecommons.org/licenses/by-sa/4.0/). Полный текст — в `LICENSE`.
+Весь текст — файлы `.md` и данные в `data/` — распространяется под
+[Creative Commons Attribution-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-sa/4.0/).
+Полный текст — в `LICENSE`.
+
+**Строка атрибуции при использовании:**
+
+> «Гайд по защите ИИ-агентов», Андрей Яковлев и Анастасия Истомина, 2026 —
+> github.com/Andy9542/guide-asi — лицензия CC BY-SA 4.0
+
+Без указания автора и лицензии CC BY-SA 4.0 повторное использование не разрешает:
+раздел 3(a)(1) требует назвать создателя, дать ссылку на источник и на лицензию.
 
 Причина копилефта не в предпочтении: описания рисков ASI01–ASI10 адаптированы из
 [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
@@ -15,11 +24,15 @@ International](https://creativecommons.org/licenses/by-sa/4.0/). Полный т
 Названия рисков и их формулировки принадлежат OWASP GenAI Security Project. Мы их адаптировали
 и перевели; ошибки перевода — наши, не OWASP.
 
-## Конфиги — Apache-2.0
+## Код — Apache-2.0
 
-Всё внутри `configs/` — под [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0),
+Всё внутри `configs/` **и `build/`** — под [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0),
 полный текст в `configs/LICENSE`. Это наш собственный код и конфигурация: их берут и правят
 под себя, копилефт тут мешал бы.
+
+`build/` вынесен сюда отдельной строкой намеренно: там лежит исполняемый скрипт, а не текст,
+и распространять программу под лицензией, которую Creative Commons прямо не рекомендует для
+программного обеспечения, было бы ошибкой.
 
 ## Лицензии инструментов
 
