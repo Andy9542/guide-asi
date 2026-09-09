@@ -1,0 +1,69 @@
+name: Предложить инструмент
+description: Инструмент, который закрывает риск агентной системы, а мы его пропустили
+title: "[инструмент] "
+labels: ["инструмент"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо. Заполните поля ниже — они ровно те, без которых инструмент нельзя
+        поставить в таблицу. Если чего-то не знаете, так и напишите: пустое поле честнее
+        догадки.
+  - type: input
+    id: repo
+    attributes:
+      label: Репозиторий
+      placeholder: https://github.com/org/name
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: Лицензия
+      description: SPDX-идентификатор. Если она обязывает к чему-то за пределами атрибуции — копилефт, запрет на управляемый сервис, платные компоненты в релизных сборках — напишите здесь же.
+      placeholder: Apache-2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: point
+    attributes:
+      label: Точка внедрения
+      options:
+        - 01 · Шлюз вызовов модели
+        - 02 · Шлюз инструментов и MCP
+        - 03 · Цепочка поставок агента
+        - 04 · Песочница исполнения
+        - 05 · Идентичность агентов и шина
+        - 06 · Память и RAG
+        - 07 · Телеметрия и red-team
+        - Не подходит ни к одной — объясню ниже
+    validations:
+      required: true
+  - type: input
+    id: risks
+    attributes:
+      label: Какие риски ASI закрывает
+      placeholder: ASI02, ASI03
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Чего НЕ закрывает
+      description: Самое важное поле. Инструмент без границ применимости опаснее его отсутствия.
+    validations:
+      required: true
+  - type: dropdown
+    id: label
+    attributes:
+      label: Метка
+      options:
+        - "[дока] — знаю по документации, сам не проверял"
+        - "[стенд] — проверял, могу рассказать что именно замерено"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Если [стенд] — что именно замерено
+      description: Что запускали, на чём, какой был результат. Проверяли ли, что контроль пропускает легитимную нагрузку, а не только блокирует атаку.
