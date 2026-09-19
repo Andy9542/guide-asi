@@ -62,7 +62,7 @@ expect 0 'found 0 configuration error(s), and 2 rule(s)' -- \
 
 # depscan: вредоносный каталог отклоняется, и вложенная зависимость тоже просканирована.
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$SRC_MAL"
-saw 'Targets scanned: 11'
+saw 'Targets scanned: 12'
 
 # depscan: легитимный каталог проходит, и у OSV при этом был вход.
 expect 0 'ЧИСТО' -- sh "$HERE/depscan.sh" "$SRC_BEN"
@@ -95,9 +95,9 @@ never 'install-script-ci-token-exfil'
 expect 1 'install-script-ci-token-exfil' -- \
   docker run --rm -v "$HERE:/rules:ro" -v "$SRC_MAL:/src:ro" "$SEMGREP_IMAGE" \
   semgrep scan $IGNORE_OFF --metrics=off --config "$RULE" --severity ERROR --error /src
-expect 0 '11' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
+expect 0 '12' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
   semgrep scan $IGNORE_OFF --metrics=off --config '$RULE' --severity ERROR --error /src \
-  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 11"
+  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 12"
 
 printf '\n'
 if [ "$FAILED" -ne 0 ]; then printf 'configs/semgrep: ПРОВАЛ\n'; exit 1; fi

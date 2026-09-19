@@ -16,9 +16,9 @@
 `sh selftest.sh` прогоняет их и сверяет с ожиданиями; команды с пометкой «[живой стенд]»
 selftest не выполняет.
 
-Оба конца проверяются на готовых образцах из `testdata/`: одиннадцать вредоносных —
+Оба конца проверяются на готовых образцах из `testdata/`: двенадцать вредоносных —
 одиннадцать форм выноса токена, включая скобочную нотацию, деструктуризацию, псевдоним
-`process.env`, дочерний процесс и файл внутри `node_modules/`; три легитимных — обычный
+`process.env`, дочерний процесс и тело запроса цепочкой, плюс копия образца внутри `node_modules/`; три легитимных — обычный
 установочный скрипт, скрипт с сетевым вызовом без секрета и скрипт с секретом без сети.
 
 ```sh
@@ -31,7 +31,7 @@ docker run --rm -v "$PWD:/rules:ro" -v "$PWD/testdata/benign:/src:ro" "$IMG" \
   semgrep scan --metrics=off --validate --config /rules/malicious-install-script.yaml /src
 
 # 2. вредоносные образцы: код 1 и ERROR install-script-ci-token-exfil на всех
-#    одиннадцати файлах (в выводе — «Scanning 11 files» и «11 Code Findings»)
+#    двенадцати файлах (в выводе — «Scanning 12 files» и «12 Code Findings»)
 docker run --rm -v "$PWD:/rules:ro" -v "$PWD/testdata/malicious:/src:ro" "$IMG" \
   semgrep scan $FLAGS --metrics=off --config /rules/malicious-install-script.yaml \
   --severity ERROR --error /src
@@ -78,9 +78,9 @@ DOCKER_HOST=tcp://127.0.0.1:1 sh depscan.sh testdata/benign
 
 ## Что замерено `[стенд]`
 
-**В этом репозитории.** Все одиннадцать образцов в `testdata/malicious` дают ERROR
+**В этом репозитории.** Все двенадцать образцов в `testdata/malicious` дают ERROR
 `install-script-ci-token-exfil`, и `depscan.sh` видит их все — в выводе
-`Targets scanned: 11`, включая файл в `node_modules/`. В `testdata/benign` три файла:
+`Targets scanned: 12`, включая файл в `node_modules/`. В `testdata/benign` три файла:
 обычный скрипт не даёт ничего, скрипт с сетевым вызовом без секрета даёт только WARNING
 про сетевой вызов, скрипт с секретом без сети (`store-put.js`) — тоже ничего. `depscan.sh`
 возвращает 1 на вредоносном каталоге, 0 на легитимном, 4 на `testdata/no-manifest`,
@@ -95,7 +95,7 @@ WARNING-правила. Переписали в режим `taint` — и опё
 стороны источника: `process.env.$VAR`. Ревью показало, что мимо проходят
 `process.env["CI_JOB_TOKEN"]`, `const { NPM_TOKEN } = process.env` и псевдоним
 `const env = process.env`, а сток `$HTTP.put(...)` при этом считает кражей `store.put(token)`
-без единого сетевого вызова. Отсюда одиннадцать образцов вместо двух и `selftest.sh`,
+без единого сетевого вызова. Отсюда двенадцать образцов вместо двух и `selftest.sh`,
 который считает файлы с находками, а не только код возврата.
 
 **На стенде.**
@@ -131,3 +131,17 @@ WARNING-правила. Переписали в режим `taint` — и опё
 - **Стоковые наборы не закреплены.** `p/javascript` и `p/supply-chain` тянутся из реестра
   Semgrep по сети: их содержимое может измениться между двумя прогонами, и повторить
   вчерашний замер по одному номеру версии нельзя.
+
+- **Другие формы источника.** `const {env} = process; env.NPM_TOKEN`, `globalThis.process.env.NPM_TOKEN`,
+  `process['env'].NPM_TOKEN`, `Object.entries(process.env)` — правило знает четыре формы обращения
+  к окружению и `JSON.stringify(process.env)`; эти проходят мимо.
+- **Другие стоки.** Сырой сокет (`net.connect(...)` и `socket.write(token)`), `globalThis.fetch(...)`,
+  динамический `import('node:https')`, псевдоним функции дочернего процесса (`const run = cp.execSync;
+  run(...)`) и передача секрета через свою функцию (`function send(t) { https.get(url + t) }`) —
+  taint в OSS-версии Semgrep не переходит границу функции.
+- **Сток `$HTTP.$METHOD` — по имени переменной, не по модулю.** Локальный модуль, присвоенный
+  переменной `https`, `net`, `request`, `got` и подобным, даст ERROR на любом своём методе с
+  секретом; сетевой модуль под другим именем ловится только формой `require('…').метод(...)`.
+- **Зависимости за пределами каталога проекта.** `node_modules`, ведущий симлинком наружу
+  (общий кэш), в контейнер не попадает: ссылка висит, файлы не сканируются, вердикт — «ЧИСТО».
+  Сканируйте каталог, где зависимости лежат физически, или разрешайте ссылки до запуска.

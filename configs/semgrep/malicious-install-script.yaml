@@ -97,6 +97,14 @@ rules:
           - pattern-either:
               - pattern: $REQ.write(...)
               - pattern: $REQ.end(...)
+      # Тот же запрос, но без переменной: https.request(opts).end(token).
+      - patterns:
+          - pattern-either:
+              - pattern: $HTTP.request(...).write(...)
+              - pattern: $HTTP.request(...).end(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(https?|axios|got|undici|superagent|request|needle|ky|net|tls)$
       # Дочерний процесс через модуль, подключённый в переменную.
       - patterns:
           - pattern-inside: |
