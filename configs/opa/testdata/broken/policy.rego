@@ -1,3 +1,5 @@
+# Фикстура третьего исхода — копия policy.rego с заведомо неверной строкой в конце:
+#   POLICY_DIR=testdata/broken sh check.sh .mcp.json   → ИНФРА, код 3, rego_parse_error
 # Решаемая политика: можно ли агенту записать по этому пути.
 #
 # Смысл именно в default deny. Список разрешённого, составленный «чтобы работало»,
@@ -40,3 +42,4 @@ basename(s) := name if {
 	count(parts) > 0
 	name := trim_right(parts[count(parts) - 1], ". ")
 }
+this is not rego {{{
