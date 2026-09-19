@@ -27,6 +27,7 @@
 каждого теста.
 """
 import json
+import os
 import sys
 
 CODES = {"pass": 0, "fail": 1, "infra": 3}
@@ -34,7 +35,17 @@ CODES = {"pass": 0, "fail": 1, "infra": 3}
 
 def finish(verdict, message):
     """Единственный выход: пояснение в stderr одной строкой, вердикт в stdout."""
-    print(" ".join(f"redteam: {message}".split())[:200], file=sys.stderr)
+    text = " ".join(f"redteam: {message}".split())[:200]
+    # stderr может быть закрыт (`2>&-`: sys.stderr is None, и print(file=None) ушёл бы
+    # в stdout) или неписуем (`2>/dev/full`): диагностика — не повод ни ронять вердикт,
+    # ни уводить чужой текст в тот поток, откуда run.sh читает вердикт.
+    try:
+        if sys.stderr is not None:
+            print(text, file=sys.stderr)
+            sys.stderr.flush()
+    except OSError:
+        # Иначе интерпретатор при выходе повторит flush, упадёт и подменит код на 120.
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     print(f"REDTEAM_VERDICT={verdict}")
     raise SystemExit(CODES[verdict])
 
