@@ -1,6 +1,6 @@
 # Правки по ревью 2026-09-18: конфиги делают то, что обещает текст
 
-**Status:** executing
+**Status:** reviewing
 **Branch:** review-fixes
 **Worktree:** .worktrees/review-fixes
 **Goal:** На этом хосте `sh build/selftest.sh` завершается кодом 0 при прогретом кэше образов, а путь «образа нет» даёт ИНФРА 3, а не ложный ноль; каждая команда «Как проверить у себя» в configs/semgrep, configs/redteam, configs/opa и configs/bus-signing даёт ровно тот код и ту строку, что обещает README, кроме команд, помеченных «[живой стенд]». Подтверждение — зелёный прогон workflow на ветке задачи через pull request плюс локальный `sh build/selftest.sh` → 0.
