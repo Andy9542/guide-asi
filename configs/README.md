@@ -19,8 +19,8 @@
 У четырёх каталогов с исполняемыми проверками — `opa/`, `semgrep/`, `bus-signing/`, `redteam/` —
 рядом с README лежит `selftest.sh`: он прогоняет команды раздела «Как проверить у себя» и
 сверяет коды возврата и строки вывода с тем, что README обещает. Всё разом —
-`sh build/selftest.sh` из корня репозитория; тот же прогон идёт в GitHub Actions на каждый
-push и pull request (`.github/workflows/selftest.yml`).
+`sh build/selftest.sh` из корня репозитория; тот же прогон идёт в GitHub Actions на pull request
+и на push в main (`.github/workflows/selftest.yml`).
 
 Всё, что здесь лежит, снято с учебного стенда. Домены и учётные данные заменены на
 заведомо нерабочие: домены — `.test` и `example.invalid`, значения секретов — плейсхолдеры.
