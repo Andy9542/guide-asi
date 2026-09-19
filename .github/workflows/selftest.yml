@@ -1,0 +1,37 @@
+# Тот же прогон, что `sh build/selftest.sh` у себя: всё, что README конфигов называют
+# замеренным «в этом репозитории», должно сходиться и на чистом раннере.
+#
+# Раннер закреплён на ubuntu-24.04, а не ubuntu-latest: с 19.10.2026 метка latest
+# переезжает на 26.04 (Python 3.14, Node 24, Docker 29), а замеры сняты на 24.04
+# (Docker 28, Python 3.12, Node 22, dash). Экшены закреплены полным SHA по той же
+# причине, что образы docker в скриптах: тег переписывают, SHA — нет. SHA сверены
+# с github.com 19.09.2026; обновление — `git ls-remote https://github.com/actions/<repo>
+# 'refs/tags/<tag>^{}'`. Пин cryptography читается из configs/bus-signing/selftest.sh,
+# чтобы версия жила в одном месте. Кэша образов и npm нет намеренно: холодный прогон
+# укладывается в таймаут, а кэш в 4 ГБ не быстрее установки.
+name: selftest
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: cryptography по пину из configs/bus-signing/selftest.sh
+        run: |
+          pin=$(sed -n "s/^CRYPTOGRAPHY_VERSION='\(.*\)'$/\1/p" configs/bus-signing/selftest.sh)
+          test -n "$pin"
+          python3 -m pip install "cryptography==$pin"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: sh build/selftest.sh
