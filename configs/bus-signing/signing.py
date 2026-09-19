@@ -165,7 +165,9 @@ def verify(envelope: dict, public_key: Ed25519PublicKey, *, recipient: str,
         signature = base64.b64decode(envelope["signature"], validate=True)
         public_key.verify(signature, _canonical(envelope))
     # binascii.Error — подкласс ValueError, отдельно ловить не нужно.
-    except (InvalidSignature, ValueError, TypeError):
+    # RecursionError: полезная нагрузка глубиной в десятки тысяч уровней роняет json.dumps —
+    # это тоже мусор на входе, а не повод для исключения.
+    except (InvalidSignature, ValueError, TypeError, RecursionError):
         return False
     if guard is not None and not guard.accept(envelope):
         return False

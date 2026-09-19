@@ -87,6 +87,13 @@ checks.append(("нечисловое и невозможное время отв
     for value in bad_ts)))
 
 # Враждебный вход: verify обязан вернуть False, а не выбросить исключение.
+# Полезная нагрузка глубиной 20 000 уровней: json.dumps в _canonical падает RecursionError,
+# и verify обязан вернуть False, а не исключение.
+deep = {}
+node = deep
+for _ in range(20_000):
+    node["a"] = {}
+    node = node["a"]
 hostile = [
     None, "строка", 42, {},
     {"sig_present": True, "signature": None, "recipient": ME},
@@ -94,6 +101,7 @@ hostile = [
     {"sig_present": True, "signature": "AAAA", "recipient": ME},
     {"sig_present": True, "signature": "AAAA", "payload": object, "recipient": ME},
     {"sig_present": True, "signature": "AAAA", "recipient": ME, 42: "ключ не строка"},
+    {"sig_present": True, "signature": "AAAA", "recipient": ME, "payload": deep},
 ]
 ok = True
 for bad in hostile:
