@@ -1,6 +1,6 @@
 # Правки по ревью 2026-09-18: конфиги делают то, что обещает текст
 
-**Status:** reviewing
+**Status:** validating
 **Branch:** review-fixes
 **Worktree:** .worktrees/review-fixes
 **Goal:** На этом хосте `sh build/selftest.sh` завершается кодом 0 при прогретом кэше образов, а путь «образа нет» даёт ИНФРА 3, а не ложный ноль; каждая команда «Как проверить у себя» в configs/semgrep, configs/redteam, configs/opa и configs/bus-signing даёт ровно тот код и ту строку, что обещает README, кроме команд, помеченных «[живой стенд]». Подтверждение — зелёный прогон workflow на ветке задачи через pull request плюс локальный `sh build/selftest.sh` → 0.
@@ -323,8 +323,34 @@ Notes: `set +e` отклоняется от плана (там не было) �
 
 ## Conclusion
 
-### Deviations from plan
+Outcome: локальная половина цели достигнута — `sh build/selftest.sh` → 0 на прогретом кэше, путь «образа нет» → ИНФРА 3, каждая команда «Как проверить у себя» в четырёх README даёт обещанный код и строку; зелёный прогон workflow ждёт пуша ветки и pull request (решение автора). Коммит: см. `git log dbbfaf1..review-fixes`, 16 коммитов.
 
+Invariants:
+- IV1 — `sh build/selftest.sh` из корня, `/` и `/tmp` → «итог: ok — код 0», девять шагов; каждое утверждение «В этом репозитории» четырёх README сверено со строкой selftest (CK1, CK3).
+- IV2 — все команды «Как проверить у себя» прогнаны дословно в клоне с обещанными кодами и строками; команды живого стенда помечены «[живой стенд]» (CK2).
+- IV3 — 24 фикстуры classify_test → «расхождений 0»; 39 форм JSON и 13 форм кода процесса дают 0/1/3 без traceback (CK7, CK9).
+- IV4 — run.sh читает только stdout classify; маркер в `error`, ANSI, закрытый и неписуемый stderr не влияют (CK8).
+- IV5 — `opa test` PASS 3/3 на 16 запрещённых и 3 разрешённых путях, C1-символы → false; мутант без фильтра «.» → FAIL (CK11, CK12).
+- IV6 — ERROR на каждом из 12 файлов `testdata/malicious`, ни одного ERROR на 3 `testdata/benign` (selftest, строка покрытия 12/12).
+- IV7 — depscan: malicious → 1, benign → 0, no-manifest → 4, broken-lock → 3, недоступный docker → 3; приоритет 1 > 3 > 4 > 0 подтверждён на восьми комбинациях (CK6).
+- IV8 — 13 проверок verify_demo, включая лишнее поле, чужой адресат, переполнение guard, ts=True/NaN/10**400, глубину 20 000 (CK14, CK15).
+- IV9 — три образа по тегу и digest, promptfoo 0.123.0, cryptography 50.0.1; digest сверены с Docker Hub и ghcr.io, SHA экшенов — с github.com (CK22); pin_check в build/selftest.sh.
+- IV10 — `git status --porcelain --ignored -uall` до и после прогона совпадает; `.gitignore` покрывает `.env`, `keys/`, `*.pem` (CK21).
+
+### Assumptions check
+- AS1 — unverifiable локально: раннер `ubuntu-24.04` с docker и доступом к ghcr.io подтверждается только прогоном workflow; actionlint чист (CK25).
+- AS2 — held: формы вывода promptfoo 0.123.0 (`results.results[]`, `gradingResult.pass`, `failureReason`, `stats.errors`, `response.cached`) сняты с реальных прогонов и легли в фикстуры.
+- AS3 — held: абзацы «На стенде» и наблюдения стенда в четырёх README не тронуты (`git diff dbbfaf1`, CK23).
+- AS4 — held: автор утвердил разбиение на три задачи 19.09.2026.
+
+### Unknowns outcome
+- UK1 — resolved: `--x-ignore-semgrepignore-files` заставляет сканировать `node_modules/`; `--no-git-ignore` нужен git-проектам и фикстурой не покрыт.
+- UK2 — resolved: OSV 128 без `Error during extraction` → 4, с ней → 3; 127 (нет сети) → 3.
+- UK3 — resolved: promptfoo 0.123.0.
+- UK4 — still-open: тёплый прогон 81–90 с; холодный на раннере не измерен (CK24).
+- UK5 — resolved: доступ к github.com и ghcr.io восстановлен 19.09.2026, пины сверены.
+
+Plan adherence:
 Волна 1 (PH1–PH4), из отчётов исполнителей, проверено оркестратором по диффам:
 
 - PH1 1.6: `never 'ЧИСТО'` → `never 'depscan: ЧИСТО'` — сообщение исхода 4 по плану само содержит слово «ЧИСТО»; проверяется отсутствие строки вердикта.
@@ -341,3 +367,11 @@ Notes: `set +e` отклоняется от плана (там не было) �
 - Коммиты: сообщения исполнителей содержали чужую строку соавторства; оркестратор заменил её на актуальную.
 - Фикс-раунд по verify (пять коммитов): 12-й образец `chain-end.js` и сток `$HTTP.request(...).end/.write(...)`; `cd --`/`ls -A --` в depscan; `sys.stderr` под защитой и devnull при OSError в classify.py; 24 случая classify_test с проверкой строки stderr; C1-диапазон в `malformed`; три пути в `policy_test.rego`; `trap '' INT TERM` в cleanup opa; helper opa без `-i`; `RecursionError` в except verify; `set +e` и эвристика без `=(` в build/selftest.sh; формулировки README (формы обхода, сток по имени, симлинк node_modules, сеть npx, триггеры CI).
 - Каркас IF1 в `configs/opa/selftest.sh` набран табуляцией (как rego-файлы каталога), в трёх остальных — пробелами; текст функций совпадает.
+
+Review findings: находок с уверенностью ≥ 80 нет (`up:reviewer`, диф dbbfaf1..620e439). Две структурные оговорки уже записаны: каркас selftest продублирован в четырёх каталогах без проверки идентичности (PC1, CK26); `pin_check` держит число образов литералом 3 (CK19).
+
+Future work:
+- Шаг в `build/selftest.sh`, сверяющий блок `expect…infra` между четырьмя selftest (cksum) — PC1 выбрал дублирование осознанно, проверка идентичности в план не входила; появится при первом расхождении.
+- Задачи `review-texts` и `review-process` — остальные находки ревью 2026-09-18 (тексты гайда, данные, процесс).
+
+Verified by: 144 состязательных проверки шестью агентами с повторным прогоном после 20 правок; smoke `sh build/selftest.sh` и `sh -e`; ручные пробы `2>&-`/`2>/dev/full`, каталог `-x`, мутанты classify и политики; двухшаговый тест authz на эфемерном порту; прогон workflow на раннере — отложен до пуша.
