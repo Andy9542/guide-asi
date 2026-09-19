@@ -10,6 +10,8 @@ HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
 SRV=''
 cleanup() {
+	# Ctrl-C в момент снятия контейнера убил бы клиент docker и оставил контейнер жить.
+	trap '' INT TERM
 	rm -rf "$TMP"
 	[ -n "$SRV" ] && docker rm -f "$SRV" >/dev/null 2>&1
 	return 0
@@ -53,7 +55,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 \
 TOKEN=$(sed -n 's/^[[:space:]]*input.identity == "\(.*\)"$/\1/p' authz.rego)
 [ -n "$TOKEN" ] || infra 'в authz.rego не нашёлся input.identity'
 
-opa() { docker run --rm -i -v "$HERE":/policy:ro "$IMAGE" "$@"; }
+opa() { docker run --rm -v "$HERE":/policy:ro "$IMAGE" "$@"; }
 
 # Сами файлы: синтаксис, строгая проверка политик, формат, тесты форм пути.
 expect 0 '' -- sh -n check.sh

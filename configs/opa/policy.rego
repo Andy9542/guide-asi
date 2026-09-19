@@ -21,10 +21,10 @@ allow if {
 	basename(input.path) != ".mcp.json"
 }
 
-# Управляющие символы и NUL — не имя файла, а попытка разъехаться с тем, кто этот путь
+# Управляющие символы (C0, DEL и C1 — U+0080–U+009F) и NUL — не имя файла, а попытка разъехаться с тем, кто этот путь
 # потом откроет. Двоеточие в базовом имени — альтернативный поток NTFS: запись в
 # `.mcp.json::$DATA` попадает в тот же файл.
-malformed(s) if regex.match(`[\x00-\x1f\x7f]`, s)
+malformed(s) if regex.match(`[\x00-\x1f\x7f\x{80}-\x{9f}]`, s)
 
 malformed(s) if contains(basename(s), ":")
 
