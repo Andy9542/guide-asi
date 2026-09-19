@@ -12,32 +12,108 @@ rules:
   # где заголовок лежит во вложенном `headers: {...}`. Форма нагрузки — не то, на что
   # можно опираться: злоумышленник соберёт объект как угодно. Опираться надо на путь
   # значения от источника к стоку.
+  #
+  # Вторая та же ошибка, уже на стороне ИСТОЧНИКА: `process.env.$VAR` — тоже форма.
+  # Ревью показало, что правило проходило мимо `process.env["CI_JOB_TOKEN"]`,
+  # мимо `const { NPM_TOKEN } = process.env` и мимо псевдонима `const env = process.env`,
+  # а сток `$HTTP.put(...)` ловил `store.put(token)` без единого сетевого вызова.
+  # Поэтому источник перечислен четырьмя формами обращения к окружению, а сток сужен
+  # до известных сетевых модулей и дочернего процесса — см. testdata/.
   - id: install-script-ci-token-exfil
     mode: taint
     languages: [javascript]
     severity: ERROR
     message: >
       Установочный скрипт берёт токен сервисной учётки из окружения и передаёт его
-      в сетевой вызов. Это кража идентичности в цепочке поставок (OWASP ASI04) —
-      зависимость нужно отклонить.
+      в сетевой вызов или в дочерний процесс. Это кража идентичности в цепочке
+      поставок (OWASP ASI04) — зависимость нужно отклонить.
     metadata:
       owasp: ASI04
       references:
         - https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
     pattern-sources:
+      # Прямое обращение: свойством и скобочной нотацией.
       - patterns:
-          - pattern: process.env.$VAR
+          - pattern-either:
+              - pattern: process.env.$VAR
+              - pattern: process.env["$VAR"]
           - metavariable-regex:
               metavariable: $VAR
               regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
-    pattern-sinks:
+      # Псевдоним: окружение сохранено в переменную, обращение идёт через неё.
+      - patterns:
+          - pattern-inside: |
+              $ENV = process.env
+              ...
+          - pattern-either:
+              - pattern: $ENV.$VAR
+              - pattern: $ENV["$VAR"]
+          - metavariable-regex:
+              metavariable: $VAR
+              regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
+      # Деструктуризация: process.env рядом с обращением не стоит вообще.
       - patterns:
           - pattern-either:
-              - pattern: $HTTP.request(...)
-              - pattern: $HTTP.get(...)
-              - pattern: $HTTP.post(...)
-              - pattern: $HTTP.put(...)
-              - pattern: fetch(...)
+              - pattern-inside: |
+                  const {..., $VAR, ...} = process.env
+                  ...
+              - pattern-inside: |
+                  let {..., $VAR, ...} = process.env
+                  ...
+              - pattern-inside: |
+                  var {..., $VAR, ...} = process.env
+                  ...
+          - pattern: $VAR
+          - metavariable-regex:
+              metavariable: $VAR
+              regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
+      # Окружение целиком: имени секрета в коде нет, а утекает оно всё.
+      - pattern: JSON.stringify(process.env)
+    pattern-sinks:
+      # Метод известного сетевого модуля.
+      - patterns:
+          - pattern: $HTTP.$METHOD(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(https?|axios|got|undici|superagent|request|needle|ky|net|tls)$
+      # Клиент, который вызывается функцией: axios({url, headers}).
+      - patterns:
+          - pattern: $HTTP(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(axios|got|undici|superagent|request|needle|ky)$
+      # Без промежуточной переменной: require('https').get(...).
+      - patterns:
+          - pattern: require('$MOD').$METHOD(...)
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch|child_process)$
+      - pattern: fetch(...)
+      # Тело пишется в объект запроса после его создания.
+      - patterns:
+          - pattern-inside: |
+              $REQ = $HTTP.request(...)
+              ...
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      # Дочерний процесс через модуль, подключённый в переменную.
+      - patterns:
+          - pattern-inside: |
+              $CP = require('$MOD')
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?child_process$
+          - pattern: $CP.$FN(...)
+      # Дочерний процесс, вынутый из модуля деструктуризацией: сток по имени функции.
+      - pattern-either:
+          - pattern: exec(...)
+          - pattern: execSync(...)
+          - pattern: execFile(...)
+          - pattern: execFileSync(...)
+          - pattern: spawn(...)
+          - pattern: spawnSync(...)
 
   # Отдельное правило и намеренно WARNING: сетевой вызов на этапе install подозрителен
   # сам по себе, но это ещё не кража. Смотреть глазами, не блокировать автоматом.
