@@ -276,85 +276,50 @@ jobs:
 - TDD по Design: в каждой фазе шаг 0 (пин), затем `selftest.sh`/фикстуры, красный прогон на старом коде: PH1 — `depscan.sh testdata/malicious` даёт «Targets scanned: 10» вместо 11 (вложенный образец не сканируется), `no-manifest` → 0 вместо 4, `store-put.js` → ERROR; старое правило ловит 3 файла из 11 (postinstall, direct-header и вложенный postinstall). PH2 — красные случаи 4–6, 8, 9, 12, 15–17 (случай 7 на старом коде зелёный: его ловит сверка кода с вердиктами). PH3 — `C:\proj\.mcp.json`, `.mcp.json.` и `''` дают ALLOW; `opa test` падает на `test_deny`. PH4 — `TypeError` на третьем аргументе `make_envelope`; `keygen.sh` повторно → 0.
 - Зелёный критерий фазы — её `selftest.sh` → 0 и последняя строка `<каталог>: ok`; для PH2 дополнительно `classify_test.py` → «расхождений 0»; для PH4 — 13 `[ok]`.
 - IV10 в каждой фазе: `git status --porcelain --ignored -uall` до и после `sh selftest.sh` совпадают; временное — только в `$TMP`.
-- PH5 на этом хосте: `sh build/selftest.sh` → «итог: ok — код 0» при прогретом кэше образов; `pin_check` с подменённым на несуществующий digest osv → semgrep/selftest даёт ИНФРА 3, а не ноль; заглушка `docker` с кодом 1 в PATH → «итог: ИНФРА — код 3»; файл-след от selftest → ПРОВАЛ `status_check`; `[[ ]]` в любом `configs/*/*.sh` → ПРОВАЛ `syntax_check` (через эвристику, не `sh -n`). Прогон workflow на раннере — единственная проверка AS1 и UK4: ветка пушится, открывается pull request, зелёный прогон фиксируется в `## Verify`.
+- PH5 на этом хосте: `sh build/selftest.sh` → «итог: ok — код 0» при прогретом кэше образов; `pin_check` с подменённым на несуществующий digest osv → semgrep/selftest даёт ИНФРА 3, а не ноль; заглушка `docker` с кодом 1 в PATH → «итог: ИНФРА — код 3»; файл-след от selftest → ПРОВАЛ `status_check`; `[[ ]]` в любом `configs/*/*.sh` → ПРОВАЛ `syntax_check` (через эвристику, не `sh -n`). Прогон workflow на раннере — единственная проверка AS1 и UK4: ветка пушится, открывается pull request, зелёный прогон фиксируется в `## Verify
 
-### Order & dependencies
-- PH0 первым: закрывает `.env` до любых `git add`.
-- PH1–PH4 независимы: пути `configs/semgrep/`, `configs/redteam/`, `configs/opa/`, `configs/bus-signing/` не пересекаются; PH1 первым материализует каркас IF1, остальные копируют его дословно.
-- PH5 после всех четырёх: `build/selftest.sh` зелёный только с четырьмя готовыми `selftest.sh`.
-- review-texts выполняется после review-fixes и берёт из него фактический размер `signing.py` и состав «грабель»; здесь фразы «default deny» (opa README:14), `:37-38`/`:43-45` redteam README и points/* не трогаются.
+Result: passed (144 проверки шестью независимыми атакующими 19.09.2026 + повторный прогон после правок; 2 отложены — нужен реальный раннер GitHub Actions)
 
-### Risks / rollback
-- RK1 — `--x-ignore-semgrepignore-files` — скрытый флаг, может исчезнуть при смене версии; страховка — digest образа и строка selftest «Targets scanned: 11» (падает первой). `--no-git-ignore` фикстурой не покрыт. Fallback — режим «каталог зависимости» в usage depscan.sh.
-- RK2 — стоковый блок depscan.sh тянет `p/javascript` из реестра по сети; без сети → ИНФРА 3, но CI зависит от semgrep.dev; наборы не закрепляются — сказано в README.
-- RK3 — `testdata/benign/package-lock.json` (ms@2.1.3) даёт 0, пока у пакета нет advisory и `api.osv.dev` доступен; появление advisory превратит benign → 1 с понятной таблицей OSV в выводе.
-- RK4 — голый сток `exec/spawn(...)` по имени даёт ERROR на пользовательской функции с таким именем; принято по PC5, названо в README.
-- RK5 — `PROMPTFOO_REQUEST_BACKOFF_MS` — внутренняя переменная promptfoo; при смене версии третий исход selftest займёт ~85 с вместо 15, результат не изменится.
-- RK6 — SHA экшенов сверены с github.com 19.09.2026 (`git ls-remote refs/tags/<tag>^{}`); неверный SHA роняет шаг checkout громко, ложно-зелёного нет.
-- RK7 — заполненный `ReplayGuard` отвергает легитимный конверт (fail closed) — отказ обслуживания вместо пропуска повтора; `skew` ограничивает жизнь записи `window + skew`; `limit` подбирать под окно × поток.
-- RK8 — новые сигнатуры `make_envelope`/`verify` и формат конверта ломают чужие копии каталога громко (`TypeError`), старые конверты отвергаются; описано в README «Совместимость».
-- RK9 — время CI: холодный `npx promptfoo` 180 с и 3,9 ГБ, образы ~570 МБ сжатых; анонимные pull с Docker Hub на раннерах лимитированы по IP — при `toomanyrequests` исход ИНФРА (не ложно-зелёный); лечится `docker login` с секретом или `actions/cache` по digest'ам.
-- RK10 — при недоступности api.osv.dev или semgrep.dev в `selftest.sh` фаза semgrep печатает ИНФРА и выходит 3 (ветка в `expect`), а не ПРОВАЛ.
-- Rollback: каждая фаза — один коммит в свой каталог; откат — `git revert` коммита фазы.
+Первый прогон: 122 held, 20 broke, 2 deferred. Все 20 сломанных исправлены пятью коммитами (`0b1dbe8`, `bbe124b`, `afccd41`, `56f6db4`, `8501673`) и перепроверены свежими пробами — ниже они помечены «broke → held». Полные протоколы атак — в журнале сессии; здесь по одной строке на гипотезу.
 
-### Interfaces
-- IF1 — контракт `configs/<dir>/selftest.sh`: POSIX sh, `sh selftest.sh` из любого cwd (`HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)`), `set -u`, `FAILED=0`, `INFRA=0`, `TMP=$(mktemp -d)`, `trap 'rm -rf "$TMP"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM`, ничего не пишет в свой каталог. Пины — переменные вида `NAME='значение'` в начале скриптов каталога, читаются `sed -n "s/^NAME='\(.*\)'$/\1/p"`. Функции: `expect <код> <подстрока> -- <команда…>` (сверяет код и подстроку в stdout+stderr; `''` — только код; сохраняет вывод в `$out`; при полученном 3 и ожидании ≠ 3 печатает `ИНФРА` и ставит `INFRA=1`; печатает `ok     <команда>` / `ПРОВАЛ <команда>: ждали код N и «…», получили код M` + вывод, ставит `FAILED=1`), `saw <подстрока>` и `never <подстрока>` (проверяют последний `$out` без перезапуска), `infra <что>` (печатает `ИНФРА  <что>`, `exit 3`); предусловия — через `infra`; выход: `FAILED=1` → 1, иначе `INFRA=1` → 3, иначе 0; последняя строка `<каталог>: ok` / `ПРОВАЛ` / `ИНФРА`. В README каталога первым абзацем «Как проверить у себя» одна и та же фраза: «Команды этого раздела с ожидаемыми кодами возврата и строками собраны в `selftest.sh` — `sh selftest.sh` прогоняет их и сверяет с ожиданиями; команды с пометкой «[живой стенд]» selftest не выполняет.»
-- IF2 [blocks] — `configs/semgrep/selftest.sh` существует и даёт 0; блокирует, потому что зелёный прогон и коммит PH5 требуют фактического файла, а не сигнатуры.
-- IF3 [blocks] — `configs/redteam/selftest.sh` существует и даёт 0; причина та же.
-- IF4 [blocks] — `configs/opa/selftest.sh` существует и даёт 0; причина та же.
-- IF5 [blocks] — `configs/bus-signing/selftest.sh` существует и даёт 0; причина та же.
+Happy-path:
+- CK1 (IV1) — `sh build/selftest.sh` из корня, из `/`, из `/tmp`, под `bash` даёт не 0 или разный вывод — held: код 0, девять шагов ok, вывод идентичен, 81–90 с на тёплом кэше.
+- CK2 (IV2) — какая-то команда «Как проверить у себя» в четырёх README отсутствует в selftest или расходится флагами — broke → held: в helper opa был лишний `-i`; убран, все команды прогнаны дословно в клоне с обещанными кодами и строками.
+- CK3 (IV1) — числа в «Что замерено» не совпадают с фактом — broke → held: «одиннадцать форм» при десяти; теперь двенадцать файлов, одиннадцать форм, 24 случая classify_test, 13 ok verify_demo — пересчитаны.
 
-Сниппет к IF1 (общая часть всех четырёх файлов, проверена под dash):
-```sh
-FAILED=0; INFRA=0; out=''
-expect() {  # expect <код> <подстрока> -- <команда…>
-  want_rc=$1; want_out=$2; [ "$3" = -- ] || infra "expect: ожидался --"; shift 3
-  out=$("$@" 2>&1); rc=$?
-  case "$out" in *"$want_out"*) hit=1 ;; *) hit=0 ;; esac
-  if [ "$rc" -eq "$want_rc" ] && [ "$hit" -eq 1 ]; then
-    printf 'ok     %s\n' "$*"
-  elif [ "$rc" -eq 3 ] && [ "$want_rc" -ne 3 ]; then
-    INFRA=1; printf 'ИНФРА  %s: инструмент не отработал\n' "$*"; printf '%s\n' "$out" | sed 's/^/       | /'
-  else
-    FAILED=1; printf 'ПРОВАЛ %s: ждали код %s и «%s», получили код %s\n' "$*" "$want_rc" "$want_out" "$rc"
-    printf '%s\n' "$out" | sed 's/^/       | /'
-  fi
-}
-saw()   { case "$out" in *"$1"*) printf 'ok     содержит «%s»\n' "$1" ;; *) FAILED=1; printf 'ПРОВАЛ нет «%s»\n' "$1" ;; esac; }
-never() { case "$out" in *"$1"*) FAILED=1; printf 'ПРОВАЛ есть «%s»\n' "$1" ;; *) printf 'ok     нет «%s»\n' "$1" ;; esac; }
-infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
-```
+Negative:
+- CK4 (IV6, PC5) — незаявленные обходы правила Semgrep: `const {env} = process`, `globalThis.process.env`, `process['env']`, `Object.entries(process.env)`, `net.connect`+`write`, функция-посредник, псевдоним `cp.execSync`, `globalThis.fetch`, `import()` — broke → held: все перечислены в README «Чего не закрывает»; `https.request(opts).end(token)` без переменной теперь ловится стоком, образец `chain-end.js`.
+- CK5 (IV6) — ложные срабатывания на легитимном коде (`fetch(process.env.REGISTRY_URL)`, `logger.request({apiKey})`, HMAC, `.npmrc`, supertest) — held; локальный модуль в переменной `https`/`net` даёт ERROR — broke → held: сток «по имени переменной» оговорён в README.
+- CK6 (IV7, PC2) — depscan на каталоге `-x`, с пробелом, кириллицей, «%», двоеточием, симлинком node_modules, проекте с `.git`+`.gitignore`, только package.json, yarn.lock, пустом каталоге; приоритет исходов 1 > 3 > 4 > 0 на восьми комбинациях — `-x` broke → held (`cd --`); симлинк наружу молча даёт ЧИСТО — broke → held: оговорено в README; остальное held.
+- CK7 (IV3) — 39 форм JSON, 13 форм кода процесса, файл 120 МБ, глубина 100 000, lone surrogate, BOM, LC_ALL=C, PYTHONWARNINGS — held: всегда 0/1/3 без traceback, stdout — одна строка.
+- CK8 (IV4) — маркер `REDTEAM_VERDICT=pass` с ANSI в `error`, закрытый и неписуемый stderr — broke → held: при `2>&-` диагностика уходила в stdout, при `2>/dev/full` вердикт не печатался и код был 120; stderr теперь пишется под защитой, оба случая дают верный код и одну строку stdout.
+- CK9 (IV3) — мутационная слабость classify_test: 10 из 11 мутантов веток INFRA выживали — broke → held: пять фикстур и сверка строки stderr; мутант «без ветки stats.errors» теперь красный.
+- CK10 (IV2, IV9) — README «сеть нужна один раз»: при мёртвом реестре npx уходит в ИНФРА через 70 с даже с прогретым кэшем — broke → held: README говорит правду про registry.npmjs.org на каждом запуске.
+- CK11 (IV5) — обходы нормализации: `\r`, `..\`, UNC, Win32 device path, `.mcp.json:`, `x/.mcp.json/.`, `./././`, гомоглифы, fullwidth, NBSP, zero-width, BOM, ведущий пробел, 100 000 символов, массив вместо строки — held (гомоглифы и ведущий пробел заявлены в README как вне области); C1-управляющие U+0080–U+009F → ALLOW — broke → held: regex `[\x00-\x1f\x7f\x{80}-\x{9f}]`.
+- CK12 (IV5) — `opa test` не ловит удаление фильтра `"."` в basename — broke → held: `deny_paths` дополнены `.mcp.json/.` и `x/.mcp.json/.`, мутант даёт FAIL 1/3.
+- CK13 (IV2) — check.sh на `-x`, `--`, `-`, `!`, `(`, кавычках, хвостовом `\`, `%s%d`, TAB/DEL/ESC/LF, юникоде под LC_ALL=C, POLICY_DIR с пробелом/симлинком/без policy.rego, через bash — held.
+- CK14 (IV8) — подделка подписи: дубли ключей через Unicode, порядок ключей, NaN/1e400 в payload, `sig_present` без подписи, подпись с пробелами, 1 МБ подписи, циклы — held; глубина 20 000 → RecursionError вместо False — broke → held: перехвачен, глубокий конверт во враждебном списке verify_demo.
+- CK15 (IV8) — ReplayGuard: limit=0, window=0, отрицательный skew, границы ±29/31 с, 200 000 accept при limit 100 000 (время, len) — held.
+- CK16 (IV2, PC2) — keygen.sh: каталог без прав, openssl вне PATH, посторонние файлы, пробел в имени — held.
+- CK17 (PC4, PH5) — эвристика башизмов: `local`, `echo -e`, `source`, `$'\n'`, `declare`, `<<<` не ловятся (заявлено: только `[[`, `function`, подстановки); ложный ПРОВАЛ на `=(` в строке — broke → held: альтернатива убрана, массивы отвергает `sh -n`.
+- CK18 (PC2) — `sh -e build/selftest.sh` обрывает сводку — broke → held: `set +e` с комментарием.
+- CK19 (IV9) — pin_check не заметит четвёртый образ по тегу без digest — broke → held (по плану 5.1 проверяется только `:latest`/`@latest` и число пинов; комментарий теперь говорит это прямо).
+- CK20 (IF1, IV10) — Ctrl-C в окне cleanup opa/selftest оставляет контейнер — broke → held: `trap '' INT TERM` в cleanup; трапы 130/143, `$TMP` и контейнер вне окна — held.
+- CK21 (IV10) — прогон, изменивший отслеживаемый файл или оставивший игнорируемый след — held: `git status --porcelain --ignored -uall` ловит и ` M`, и `!!`.
 
-### Interface graph
-- PH0 -> @ .gitignore
-- PH1 -> IF1, IF2 @ configs/semgrep/
-- PH2 IF1 -> IF3 @ configs/redteam/
-- PH3 IF1 -> IF4 @ configs/opa/
-- PH4 IF1 -> IF5 @ configs/bus-signing/
-- PH5 IF1, IF2, IF3, IF4, IF5 -> @ build/, .github/, configs/README.md
+Invariants / assumptions:
+- CK22 (IV9) — digest в скриптах не совпадают с реестрами — held: semgrep и opa сверены с Docker Hub, osv v2.6.0 с ghcr.io, SHA экшенов с github.com.
+- CK23 (AS3, PC3) — абзацы «На стенде» и наблюдения стенда изменены — held: `git diff dbbfaf1` по четырём README — замеренные абзацы нетронуты.
+- CK24 (UK4) — 25 минут не хватит на холодный прогон — deferred: тёплые прогоны 81–90 с, холодный npx по замеру планирования 180 с, образы ~570 МБ; собственного холодного прогона на раннере нет.
+- CK25 (AS1) — у раннера ubuntu-24.04 нет docker или доступа к ghcr.io — deferred: проверяется только запуском workflow; workflow прошёл actionlint без ошибок.
 
-## Code smells
+Interfaces:
+- CK26 (IF1) — фраза в четырёх README не дословна, каркас `expect/saw/never/infra` расходится — held: фраза байт-в-байт одинакова; каркас идентичен в semgrep/redteam/bus-signing, в opa отличается только табуляцией.
+- CK27 (IF2–IF5) — `configs/<dir>/selftest.sh` не даёт 0 из чужого cwd — held.
 
-Найдено при планировании, вне области задачи (PC3); не правится здесь.
-
-- `configs/semgrep/depscan.sh:71` — `p/supply-chain` в анонимном реестре — одно WARNING-правило про bidi-символы, под `--severity ERROR` не выполняется; название «стоковые наборы» вводит в заблуждение.
-- `configs/semgrep/malicious-install-script.yaml:64` — в regex WARNING-правила `node_fetch` никогда не совпадает; цепочка `require('https').request(...)` WARNING-правилом не видна.
-- `configs/semgrep/README.md:4` — трактовка LGPL-2.1 («придётся отдать обратно») противоречит points/03 и tools.csv (review-texts).
-- `.gitignore:11` — `.semgrepignore` в игноре, хотя ни один скрипт его не создаёт.
-- `configs/redteam/promptfooconfig.yaml:9,25` — ключ значением в YAML при поддержке `apiKeyEnvar`; `:22` — судья равен `chat-fallback`, на который уходит и цель; `:29-49` — одна рубрика на три пробы без пометки «вывод недоверенный».
-- `configs/redteam/run.sh:18` — `PROMPTFOO_DISABLE_TELEMETRY`/`PROMPTFOO_DISABLE_UPDATE` не выставлены; selftest ставит их только себе.
-- `configs/redteam/README.md:37-38, 43-45` — «суточный кэш» (по факту TTL 14 дней) и объяснение `stats.errors` под меткой `[стенд]`; замер для review-texts: 401 → `stats.errors=0`, connection refused → `stats.errors=3`.
-- `configs/opa/authz.rego:30` — открыт только `/health`; `/health/live` и `/health/ready` → 401; `:21-25` — агентский токен не ограничен по `input.params` (`?explain=full` отдаёт трассу); `:22` — токен литералом вместо `data.tokens.agent`.
-- `configs/opa/policy.rego:3-5`, `configs/opa/README.md:14` — «default deny» при фактическом блок-листе на одно имя; конфиги других клиентов разрешены (review-texts).
-- `configs/opa/README.md:19` — контракт входа шлюза (`{"input":{"path":…}}`, поведение без `path`) описан только через check.sh.
-- `configs/bus-signing/signing.py:58-61` — аннотации `X | None` без `from __future__ import annotations`: импорт падает на Python < 3.10, версия не заявлена; `:47-54` — `load_public` принимает любой PEM, RSA-ключ даёт молчаливые False; `:44` — канонизация непереносима на JS/Go (README оговаривает, не чинит).
-- `points/05-identity.md:18,41` — «сорок строк на Ed25519» (число снимается в 4.5); `points/07-observability.md:48-58` — «Три грабли» другого состава; `NOTICE.md:33` — «исполняемый скрипт» в единственном числе; `CONTRIBUTING.md:22` — нет «перед PR: `sh build/selftest.sh`» (review-texts / review-process).
-- `configs/semgrep/depscan.sh:60` — `docker pull … >/dev/null 2>&1 || return 3` гасит текст ошибки pull: «нет сети» и «нет такого digest» в выводе неразличимы (GPC7).
-- `configs/semgrep/depscan.sh:97` — `[ "$rc" -eq 1 ] && SEM_RC=1` вместо явного `if`: последней строкой скрипта задала бы код 1 (GPC6).
-- `configs/bus-signing/README.md:22` — пин `cryptography==50.0.1` продублирован текстом README и переменной selftest.sh (следствие PC1).
-- `build/check_links.py:27,76,79` — `#` внутри fenced-кода считается заголовком; 403 в списке ok; внешние 404 не влияют на код (review-process).
-
-## Verify
+Smoke: `sh build/selftest.sh` после всех правок → «итог: ok — код 0» (девять шагов ok, 84 с); `sh -e build/selftest.sh` печатает сводку.
+Goal: proxy only — локальная половина цели доказана (selftest 0 на прогретом кэше; путь «образа нет» → ИНФРА 3 по подменённому digest); зелёный прогон workflow на ветке через pull request остаётся: пуш и PR — по решению автора на этапе завершения (CK24, CK25).
+Notes: `set +e` отклоняется от плана (там не было) — иначе ИНФРА одного каталога прячет ПРОВАЛ другого; `sys.stderr = devnull` при OSError — без этого интерпретатор при выходе подменял код на 120.
 
 ## Conclusion
 
@@ -374,3 +339,5 @@ infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
 - PH4 4.4: строка `ИНФО cryptography <версия>` печатается всегда; расхождение с пином даёт вторую строку ИНФО, не ИНФРА.
 - PH5 5.1: эвристика башизмов — `\[\[[^:]` вместо `\[\[`, иначе ложный ПРОВАЛ на POSIX-классах `[[:cntrl:]]`/`[[:space:]]` в check.sh и selftest.sh (замечание исполнителя PH3); шаблон собирается из частей, чтобы не совпадать с собственным текстом.
 - Коммиты: сообщения исполнителей содержали чужую строку соавторства; оркестратор заменил её на актуальную.
+- Фикс-раунд по verify (пять коммитов): 12-й образец `chain-end.js` и сток `$HTTP.request(...).end/.write(...)`; `cd --`/`ls -A --` в depscan; `sys.stderr` под защитой и devnull при OSError в classify.py; 24 случая classify_test с проверкой строки stderr; C1-диапазон в `malformed`; три пути в `policy_test.rego`; `trap '' INT TERM` в cleanup opa; helper opa без `-i`; `RecursionError` в except verify; `set +e` и эвристика без `=(` в build/selftest.sh; формулировки README (формы обхода, сток по имени, симлинк node_modules, сеть npx, триггеры CI).
+- Каркас IF1 в `configs/opa/selftest.sh` набран табуляцией (как rego-файлы каталога), в трёх остальных — пробелами; текст функций совпадает.
