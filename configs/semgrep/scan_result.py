@@ -131,11 +131,24 @@ def incompleteness(expected: set[str], report: dict) -> list[str]:
     return gaps
 
 
+def findings_of(report: dict) -> list:
+    """Блокирующие находки: записи results с extra.severity == ERROR."""
+    return [r for r in report['results'] if severity(r) == 'ERROR']
+
+
+def where(result: dict) -> str:
+    """`check_id в path:line` одной находки; чего нет в записи — заменяется знаком вопроса."""
+    start = result.get('start')
+    line = start.get('line') if isinstance(start, dict) else None
+    return '%s в %s:%s' % (result.get('check_id', '?'), result.get('path', '?'),
+                           line if isinstance(line, int) else '?')
+
+
 def classify(expected: set[str], report: dict, rc: int) -> tuple[int, str]:
     """(код, строка вердикта без префикса). Находка важнее неполноты."""
     if rc not in (0, 1):
         return 3, 'НЕПОЛНО — semgrep завершился кодом %d' % rc
-    findings = [r for r in report['results'] if severity(r) == 'ERROR']
+    findings = findings_of(report)
     gaps = incompleteness(expected, report)
     if rc == 1 and findings:
         line = 'НАХОДКА — блокирующих находок %d' % len(findings)
@@ -172,6 +185,15 @@ def main(argv: list[str]) -> int:
         print('scan_result: %s: файлов профиля %d, просканировано %d, ошибок %d, код semgrep %s'
               % (stage, len(expected), len(report['paths']['scanned']),
                  len(report['errors']), rc_text), file=sys.stderr)
+        # Сам отчёт depscan.sh удаляет вместе с временным каталогом, а в stderr Semgrep
+        # при --json находок нет: без этих строк оператор видел бы «ОТКЛОНЕНО» и не знал,
+        # какой файл и какое правило.
+        findings = findings_of(report) if rc_text in ('0', '1') else []
+        for result in findings[:SHOWN]:
+            print('scan_result: %s: находка %s' % (stage, where(result)), file=sys.stderr)
+        if len(findings) > SHOWN:
+            print('scan_result: %s: и ещё %d находок' % (stage, len(findings) - SHOWN),
+                  file=sys.stderr)
     print('scan_result: %s' % ' '.join(line.split()))  # вердикт — ровно одна строка
     return code
 

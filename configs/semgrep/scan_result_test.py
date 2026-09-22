@@ -145,6 +145,20 @@ class ScanResultCase(unittest.TestCase):
         self.assertEqual(code, 1, line)
         self.assertIn('НАХОДКА', line)
 
+    def test_finding_is_named_in_stderr(self):
+        # Отчёт depscan.sh удаляет, поэтому файл и правило находки должны быть в stderr.
+        self.touch('install.js')
+        path = os.path.join(self.tmp.name, 'semgrep.json')
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(report(['/src/install.js'], results=[finding('/src/install.js')]), fh)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = scan_result.main(['scan_result.py', 'таргетные', self.proj, path, '1'])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn('находка rules.install-script-ci-token-exfil в /src/install.js:2',
+                      err.getvalue())
+        self.assertEqual(len(out.getvalue().splitlines()), 1)
+
     def test_finding_wins_over_incomplete_but_says_so(self):
         self.touch('install.js'); self.touch('slow.js')
         code, line = self.helper(1, report(['/src/install.js', '/src/slow.js'],
