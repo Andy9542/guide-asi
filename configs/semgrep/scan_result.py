@@ -144,23 +144,27 @@ def where(result: dict) -> str:
                            line if isinstance(line, int) else '?')
 
 
-def classify(expected: set[str], report: dict, rc: int) -> tuple[int, str]:
-    """(код, строка вердикта без префикса). Находка важнее неполноты."""
+def classify(expected: set[str], report: dict, rc: int) -> tuple[int, str, list]:
+    """(код, строка вердикта без префикса, блокирующие находки). Находка важнее неполноты.
+
+    Находки возвращаются, а не пересчитываются вызывающим: их список нужен и для
+    решения, и для печати атрибуции, и фильтр должен быть один.
+    """
     if rc not in (0, 1):
-        return 3, 'НЕПОЛНО — semgrep завершился кодом %d' % rc
+        return 3, 'НЕПОЛНО — semgrep завершился кодом %d' % rc, []
     findings = findings_of(report)
     gaps = incompleteness(expected, report)
     if rc == 1 and findings:
         line = 'НАХОДКА — блокирующих находок %d' % len(findings)
-        return 1, line + (' — неполно: %s' % '; '.join(gaps) if gaps else '')
+        return 1, line + (' — неполно: %s' % '; '.join(gaps) if gaps else ''), findings
     if findings or rc == 1:
         return 3, ('НЕПОЛНО — код semgrep %d не сходится с числом находок %d'
-                   % (rc, len(findings)))
+                   % (rc, len(findings))), findings
     if gaps:
-        return 3, 'НЕПОЛНО — %s' % '; '.join(gaps)
+        return 3, 'НЕПОЛНО — %s' % '; '.join(gaps), []
     if not expected:
-        return 4, 'НЕТ ВХОДА — в каталоге нет файлов профиля (%s)' % ' '.join(JS_EXTS)
-    return 0, 'ЧИСТО — просканированы все %d файлов профиля, ошибок нет' % len(expected)
+        return 4, 'НЕТ ВХОДА — в каталоге нет файлов профиля (%s)' % ' '.join(JS_EXTS), []
+    return 0, 'ЧИСТО — просканированы все %d файлов профиля, ошибок нет' % len(expected), []
 
 
 def main(argv: list[str]) -> int:
@@ -178,7 +182,7 @@ def main(argv: list[str]) -> int:
     try:
         expected = inventory(project_dir)
         report = load_report(report_path)
-        code, line = classify(expected, report, int(rc_text))
+        code, line, findings = classify(expected, report, int(rc_text))
     except Incomplete as exc:
         code, line = 3, 'НЕПОЛНО — %s' % exc
     else:
@@ -188,7 +192,6 @@ def main(argv: list[str]) -> int:
         # Сам отчёт depscan.sh удаляет вместе с временным каталогом, а в stderr Semgrep
         # при --json находок нет: без этих строк оператор видел бы «ОТКЛОНЕНО» и не знал,
         # какой файл и какое правило.
-        findings = findings_of(report) if rc_text in ('0', '1') else []
         for result in findings[:SHOWN]:
             print('scan_result: %s: находка %s' % (stage, where(result)), file=sys.stderr)
         if len(findings) > SHOWN:

@@ -72,7 +72,7 @@ expect 0 'found 0 configuration error(s), and 2 rule(s)' -- \
 
 # depscan: вредоносный каталог отклоняется, и вложенная зависимость тоже просканирована.
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$SRC_MAL"
-saw 'Targets scanned: 16'
+saw 'Targets scanned: 25'
 saw 'scan_result: НАХОДКА'
 
 # depscan: легитимный каталог проходит, и у OSV при этом был вход.
@@ -106,15 +106,15 @@ never 'install-script-ci-token-exfil'
 expect 1 'install-script-ci-token-exfil' -- \
   docker run --rm -v "$HERE:/rules:ro" -v "$SRC_MAL:/src:ro" "$SEMGREP_IMAGE" \
   semgrep scan $SCAN_FLAGS --metrics=off --config "$RULE" --severity ERROR --error /src
-expect 0 '16' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
+expect 0 '25' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
   semgrep scan $SCAN_FLAGS --metrics=off --config '$RULE' --severity ERROR --error /src \
-  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 16"
+  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 25"
 
 # Тот же прогон без --disable-nosem: два образца выключают правило комментарием из
 # собственного кода, и блокируются только четырнадцать. Флаг несущий, не украшение.
-expect 0 '14' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
+expect 0 '23' -- sh -c "docker run --rm -v '$HERE:/rules:ro' -v '$SRC_MAL:/src:ro' '$SEMGREP_IMAGE' \
   semgrep scan $NOSEM_ON --metrics=off --config '$RULE' --severity ERROR --error /src \
-  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 14"
+  2>/dev/null | grep -oE '/src/[^ ]+\.js' | sort -u | wc -l | tr -d ' ' | grep -x 23"
 
 # Пропуск по размеру: Semgrep не читает файл больше 1 МБ и выходит кодом 0. Утечка в
 # конце наполнителя не видна никому — это не «чисто», а отсутствие вердикта.
