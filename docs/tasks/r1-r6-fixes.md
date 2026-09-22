@@ -1,6 +1,6 @@
 # Доработка PR #1 по ревью 22.09.2026: замечания R1–R6
 
-**Status:** executing
+**Status:** validating
 **Branch:** review-fixes
 **Worktree:** .worktrees/review-fixes
 **Goal:** Каждый контрпример R1–R6 из ревью PR #1 (комментарий id=5776584244) воспроизводится на `d033347` и не воспроизводится на итоговой вершине; для каждого есть регрессионная проверка в selftest или тесте; `sh build/selftest.sh` → 0 локально и зелёный прогон CI на итоговой вершине PR #1; заголовок и описание PR заменены. Подтверждение — повтор контрпримеров на итоговом SHA и ссылка на успешный run.
@@ -145,4 +145,37 @@ Approach: три независимые фазы по каталогам (пут
 
 ## Verify
 
+Стадия: четыре независимых проверяющих (workflow `verify-r1-r6`, 22.09.2026) на `5b93d65` против базы `d033347` (detached worktree); мой сквозной `sh build/selftest.sh` → 0 на `5b93d65`, `git status --porcelain --ignored -uall` не изменился. Итог: 40 проверок CK1–CK40, 40 pass, 0 fail, 0 ИНФРА. Полные наблюдения — в журнале workflow (`scratchpad/verify_results.json`).
+
+Изменение → проверка → результат на SHA:
+
+- **R1 · nosemgrep.** `SCAN_FLAGS` с `--disable-nosem` (4a5dcd2). CK2: утечка с `// nosemgrep` и с `// nosemgrep: install-script-ci-token-exfil` → на `5b93d65` код 1, `depscan: ОТКЛОНЕНО`; на `d033347` код 0, «ЧИСТО». Регрессия: `testdata/malicious/nosem-comment.js`, `nosem-rule-id.js`; строки selftest «16 файлов» и «без `--disable-nosem` — 14». CK12: команды README дословно — 16 файлов, 18 находок, 14 без флага.
+- **R2 · охват.** `scan_result.py` + `--json --verbose`, решение по паре «код + строка» (4a5dcd2). CK3: `benign.js` + `big.js` 1,2 МБ → на `5b93d65` код 3, `НЕПОЛНО — не просканировано 1 из 2 файлов профиля: /src/big.js (exceeded_size_limit)`; на `d033347` код 0, «ЧИСТО». CK7–CK9: Timeout при rc=0 → 3; PartialParsing → 3; пропуск без и с `--verbose` → 3; находка + Timeout на другом файле → 1 с «неполно»; пустой, `{`, `[]`, `null`, отсутствующий отчёт → 3; rc=0 с находками и rc=1 без → 3; rc=2 → 3; неверный вызов → 2; stdout — ровно одна строка. CK10: симлинк → 3, только lock-файл → 4 «НЕТ ВХОДА», benign → 0. CK11: заглушка `python3` (`exit 1`; печатает «ЧИСТО» и `exit 1`) → 3 без «ОТКЛОНЕНО». CK36: PATH без python3 → 3 «ИНФРА». Регрессия: `scan_result_test.py` (21), строки selftest «большой файл → НЕПОЛНО», «fakepy → ИНФРА», «шесть расширений → ЧИСТО».
+- **R3 · ложная блокировка.** Две ветки стока с regex на `$HTTP` и `$MOD` (4a5dcd2). CK4: каталог только с `store-request.js` → на `5b93d65` код 0, «ЧИСТО»; на `d033347` код 1, две находки. CK5: `https.request(...)` → `req.write(token)` и `req.end(token)` → 1 на обоих файлах. Регрессия: `testdata/benign/store-request.js`, `testdata/malicious/req-var-write.js`, `req-var-end.js`.
+- **R4 · набор проб.** `preflight.py`, манифест, `classify.py --expected`, прогон по копии (d143d51). CK14: три строки с `testIdx = [0, 0, 0]` → на `d033347` `REDTEAM_VERDICT=pass`, код 0; на `5b93d65` `REDTEAM_VERDICT=infra`, код 3, «повторяется». CK15–CK16: перестановка `[2, 0, 1]` → 0; `[0, 1, 3]`, четыре строки при трёх пробах, `testIdx` строкой, `promptIdx = 1`, чужие `vars`/`assert`/`provider.id` → 3. CK17: preflight отклоняет 10 конфигов разведки (два провайдера, два промпта, `repeat`, список в `vars`, `scenarios`, `provider` в тесте и в `defaultTest`, внешние tests, `!!python/object`, плоские `yes`/`010`) кодом 3 одной строкой stderr и пустым stdout; принимает `echo-pass`, `echo-fail`, `promptfooconfig.yaml`; манифест без `REPLACE_WITH_VIRTUAL_KEY`/`apiKey`/`Authorization`. CK18: устаревшая выгрузка по `REDTEAM_JSON` + неподдержанный конфиг → 3, файл удалён, promptfoo не запускался; `REDTEAM_JSON=/dev/full` → 3 «не удалось записать»; echo-pass/echo-fail/погашенный шлюз → 0/1/3. CK19: все 24 прежних случая `classify_test` на месте с теми же исходами. CK20: без PyYAML → selftest 3 «ИНФРА» без traceback, preflight → 3 с подсказкой. CK21: шаг CI с `requirements.txt` стоит до `build/selftest.sh`. Регрессия: `preflight_test.py` (28), `classify_test.py` (39), строки selftest.
+- **R5 · guard обязателен.** `verify(…, guard)` без умолчания, `verify_signature()` отдельно (5b93d65). CK24: `signing_test.py` на `signing.py` из `d033347` → failures (guard-обязателен и конкурентные); на `5b93d65` → `Ran 8 tests`, OK. CK25: `[True, False]`; без guard и с `None` → `TypeError`; `verify_signature` дважды → `[True, True]`, чужой recipient → False, пустой → `TypeError`; на `d033347` `verify` без guard → `[True, True]`.
+- **R6 · атомарность.** Одна критическая секция под `threading.Lock` (5b93d65). CK26: восемь потоков, один конверт, медленное множество → на `d033347` принято больше одного и `len(_expiry) = 8` при `len(_seen) = 1`; на `5b93d65` принят ровно один, 1/1, зависших нет. CK27: `limit=10`, 40 потоков → принято 10, `len(_seen) == len(_expiry) == 10`. CK28: подделка с nonce легитимного → False и место не занимает; легитимный после неё → True. CK29: чужой recipient, изменённые payload/meta, лишнее поле, просроченный и будущий ts, `None`/список/строка/без подписи/подпись не строкой/nonce не строкой/вложенность 20 000 → False без исключений. CK31: по коду — очистка, проверка nonce и лимита, add, heappush под одним `with self._lock`; внутри секции нет `len(self)`; подпись проверяется до `accept`. CK30/CK32: демо 14 `[ok]`, вызовов старого API вне каталога нет, README как инструкция сходится.
+- **Сквозные.** CK1/CK13/CK23: selftest трёх каталогов из `/` → 0, следов нет. CK33: пины образов, promptfoo, cryptography, `uses:` не менялись. CK34: правки только в разрешённых путях. CK35: темы и трейлеры коммитов, числа в телах сверены. CK37: `LC_ALL=C` — без `UnicodeEncodeError` и traceback. CK38: мусора нет, завершающий `\n` везде, CRLF нет. CK39: workflow разбирается, порядок шагов checkout → python → cryptography → PyYAML → node → selftest, все `uses:` по SHA. CK40: без cryptography и без PyYAML selftest каталога → 3 «ИНФРА» с подсказкой.
+
+Фикс-раунд по замечаниям проверяющих (коммиты после `5b93d65`):
+
+- `scan_result.py` печатает в stderr `находка <правило> в <файл>:<строка>` (до пяти, дальше счётчик): при «ОТКЛОНЕНО» оператор видел только число находок, а отчёт `depscan.sh` удаляет вместе с временным каталогом. Тест `test_finding_is_named_in_stderr`; `scan_result_test.py` → 21; `configs/semgrep/selftest.sh` из `/` → 0.
+- `run.sh`: `trap 'exit 130' INT`, `trap 'exit 143' TERM`, чтобы под dash сработал EXIT и копия конфига с ключом провайдера не оставалась в `$WORK`. `configs/redteam/selftest.sh` из `/` → 0.
+- README: `configs/README.md` называет openssl среди зависимостей (его требует `bus-signing/selftest.sh`); `bus-signing/README.md` — 204 строки по `wc -l`; `redteam/README.md` — три пробы проверяют ASI01 и не касаются памяти (ASI06), как просил автор.
+- Не правилось (не дефекты, см. Code smells): `guard=False` даёт `AttributeError`, а не `TypeError` (docstring обещает проверку только `None`); подсказка про `verify_signature` есть только при `guard=None`; число тестов повторено в README и selftest намеренно; режимы новых `.py` неоднородны, напрямую они не запускаются; `.selftest-big.*` не в `.gitignore` намеренно (RK6); `bus-signing/README.md` советует общий `/tmp/bus-keys`.
+
 ## Conclusion
+
+**Goal:** достигнут в части кода и проверок; пункты «зелёный CI на итоговой вершине» и «заголовок и описание PR заменены» закрываются после пуша — их результат дописывается ниже отдельным коммитом.
+
+**Invariants:** IV1–IV7 подтверждены проверяющими (CK2–CK5, CK7–CK11, CK14–CK20, CK24–CK29); IV8 — `sh build/selftest.sh` → 0 на `5b93d65`, 24 прежних случая сохранены (CK19), без python3/PyYAML → ИНФРА (CK36, CK20); IV9 — пины не менялись, единственная новая зависимость `pyyaml==6.0.3` в CI (CK33, CK21).
+
+**Assumptions:** AS1 — проверяется прогоном CI (шаг добавлен, CK21); AS2 — форматы Semgrep 1.176.1 и promptfoo 0.123.0 сошлись с фикстурами разведки на реальных прогонах (CK7, CK14, CK18); AS3 — несовместимости объявлены в README каталогов и в описании PR, автор задал их своим планом.
+
+**Unknowns:** UK1 — 18 находок на 16 файлах (два образца дают по две), README обновлён; UK2 — на хосте PyYAML 6.0.1 (apt) selftest проходит, CI ставит 6.0.3 — паритет подтверждается прогоном CI; UK3 — `Ran 8 tests`, 14 `[ok]`.
+
+**Deviations:** правило R3 получило две ветки вместо одной (одной формы `$HTTP.request` недостаточно: терялись `req-write.js` и `json-stringify-env.js`); тест гонки R6 расширяет окно медленным множеством вместо барьера в секции (барьер не ловил гонку); фикс-раунд добавил два кодовых коммита сверх четырёх плановых.
+
+**Code smells:** перечислены в фикс-раунде выше; отдельно — `classify()` в `depscan.sh` (OSV) и `classify()` в `scan_result.py` — одноимённые функции разного назначения.
+
+**Status:** validating — ждёт пуша, зелёного CI на итоговой вершине и замены описания PR #1.
