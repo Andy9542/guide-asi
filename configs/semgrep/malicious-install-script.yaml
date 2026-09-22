@@ -89,11 +89,28 @@ rules:
               metavariable: $MOD
               regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch|child_process)$
       - pattern: fetch(...)
-      # Тело пишется в объект запроса после его создания.
+      # Тело пишется в объект запроса после его создания. Веток две, потому что
+      # metavariable-regex сверяет ТЕКСТ метапеременной: у `https.request(...)` это
+      # `https`, а у `require('https').request(...)` — целиком `require('https')`,
+      # и одним выражением оба случая не описать. Без сужения источника запроса сюда
+      # попадал любой локальный объект с методом `request` — см. testdata/benign/store-request.js.
       - patterns:
           - pattern-inside: |
               $REQ = $HTTP.request(...)
               ...
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(https?|axios|got|undici|superagent|request|needle|ky|net|tls)$
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      - patterns:
+          - pattern-inside: |
+              $REQ = require('$MOD').request(...)
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls)$
           - pattern-either:
               - pattern: $REQ.write(...)
               - pattern: $REQ.end(...)
