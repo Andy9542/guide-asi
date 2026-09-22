@@ -23,7 +23,7 @@ selftest не выполняет.
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
 python3 classify_test.py        # классификатор на 39 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 28 конфигов: что допускается к прогону и что отклоняется
+python3 preflight_test.py       # 30 конфигов: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -86,7 +86,7 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (19–25 секунд на
 прогретом кэше npx), 15 сошедшихся строк: `classify_test.py` → «расхождений 0» на 39
-выгрузках; `preflight_test.py` → «расхождений 0» на 28 конфигах; `sh -n` на `run.sh` и
+выгрузках; `preflight_test.py` → «расхождений 0» на 30 конфигах; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой

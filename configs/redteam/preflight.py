@@ -88,16 +88,25 @@ def scalar_problem(node):
     return f"тип {node.tag.rsplit(':', 1)[-1]} (дата, бинарь) читается двумя парсерами по-разному"
 
 
-def ambiguous_scalars(node, path=""):
-    """Плоские скаляры, которые PyYAML и js-yaml прочитают по-разному: (путь, текст, причина)."""
+def ambiguous_scalars(node, path="", trail=()):
+    """Плоские скаляры, которые PyYAML и js-yaml прочитают по-разному: (путь, текст, причина).
+
+    Дерево узлов после compose() — граф: якорь с ссылкой на самого себя (`&a {x: *a}`)
+    зацикливает обход. trail — узлы на текущем пути; повтор в нём означает цикл, и такой
+    конфиг отклоняется: манифест с бесконечной структурой не записать.
+    """
+    if id(node) in trail:
+        raise Unsupported(f"{path or 'корень'}: якорь ссылается сам на себя (цикл) — "
+                          "манифест ожиданий из такого конфига не построить")
+    trail = trail + (id(node),)
     found = []
     if isinstance(node, yaml.MappingNode):
         for key, value in node.value:
-            found += ambiguous_scalars(key, f"{path}.{key.value}")
-            found += ambiguous_scalars(value, f"{path}.{key.value}")
+            found += ambiguous_scalars(key, f"{path}.{key.value}", trail)
+            found += ambiguous_scalars(value, f"{path}.{key.value}", trail)
     elif isinstance(node, yaml.SequenceNode):
         for index, item in enumerate(node.value):
-            found += ambiguous_scalars(item, f"{path}[{index}]")
+            found += ambiguous_scalars(item, f"{path}[{index}]", trail)
     elif isinstance(node, yaml.ScalarNode) and node.style is None:
         why = scalar_problem(node)
         if why:
@@ -233,6 +242,10 @@ def main(argv):
         return reject(str(exc))
     except OSError as exc:
         return reject(f"конфиг не прочитан: {exc}")
+    except RecursionError:
+        # Тысячи уровней вложенности роняют сам парсер; это отказ по контракту (код 3),
+        # а не traceback: вызывающий разбирает исходы по коду.
+        return reject("вложенность конфига слишком глубока — конфиг не разобран")
     shutil.copyfile(config_path, copy_path)
     with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, ensure_ascii=False)
