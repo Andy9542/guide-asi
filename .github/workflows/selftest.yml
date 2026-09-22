@@ -31,6 +31,10 @@ jobs:
           pin=$(sed -n "s/^CRYPTOGRAPHY_VERSION='\(.*\)'$/\1/p" configs/bus-signing/selftest.sh)
           test -n "$pin"
           python3 -m pip install "cryptography==$pin"
+      # Единственная новая зависимость самопроверки — YAML: configs/redteam/preflight.py
+      # разбирает конфиг promptfoo до вызова модели. Пин живёт в requirements.txt каталога.
+      - name: PyYAML по пину из configs/redteam/requirements.txt
+        run: python3 -m pip install -r configs/redteam/requirements.txt
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"

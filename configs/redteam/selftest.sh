@@ -34,6 +34,8 @@ infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
 PIN=$(sed -n "s/^PROMPTFOO_VERSION='\(.*\)'$/\1/p" "$HERE/run.sh")
 
 command -v python3 >/dev/null 2>&1 || infra 'нет python3'
+python3 -c 'import yaml' 2>/dev/null ||
+  infra 'у python3 нет PyYAML — pip install -r requirements.txt (при PEP 668: apt install python3-yaml или venv)'
 command -v npx >/dev/null 2>&1 || infra 'нет npx — нужен node'
 case "$PIN" in
   [0-9]*.[0-9]*.[0-9]*) : ;;
@@ -54,6 +56,7 @@ sed 's#http://localhost:4000/v1#http://127.0.0.1:1/v1#g' \
     "$HERE/promptfooconfig.yaml" > "$TMP/dead-gateway.yaml"
 
 expect 0 'расхождений 0' -- python3 "$HERE/classify_test.py"
+expect 0 'расхождений 0' -- python3 "$HERE/preflight_test.py"
 expect 0 '' -- sh -n "$HERE/run.sh"
 expect 0 '' -- sh -n "$HERE/selftest.sh"
 expect 3 'REDTEAM_VERDICT=infra' -- env REDTEAM_CONFIG="$TMP/dead-gateway.yaml" \
@@ -62,6 +65,29 @@ expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$HERE/testdata/echo-pass.
     REDTEAM_JSON="$TMP/pass.json" sh "$HERE/run.sh"
 expect 1 'REDTEAM_VERDICT=fail' -- env REDTEAM_CONFIG="$HERE/testdata/echo-fail.yaml" \
     REDTEAM_JSON="$TMP/fail.json" sh "$HERE/run.sh"
+
+# Не поддержанный режим (второй целевой провайдер) отклоняется ДО вызова модели: promptfoo
+# не запускается, выгрузки нет. Без этого шесть строк на три пробы читались как полный набор.
+expect 3 'REDTEAM_VERDICT=infra' -- env REDTEAM_CONFIG="$HERE/testdata/echo-unsupported.yaml" \
+    REDTEAM_JSON="$TMP/unsupported.json" sh "$HERE/run.sh"
+saw 'ровно один целевой провайдер'
+never 'Writing output to'
+expect 1 '' -- test -e "$TMP/unsupported.json"
+
+# Выгрузка удачного прогона, оставленная по пути публикации, не становится результатом
+# следующего: прогон отклонён, старый файл убран, вердикт — 3.
+cp "$TMP/pass.json" "$TMP/stale.json" || infra 'нет выгрузки удачного прогона — проверять устаревание нечем'
+expect 3 'REDTEAM_VERDICT=infra' -- env REDTEAM_CONFIG="$HERE/testdata/echo-unsupported.yaml" \
+    REDTEAM_JSON="$TMP/stale.json" sh "$HERE/run.sh"
+expect 1 '' -- test -e "$TMP/stale.json"
+
+# Ошибка записи результата — инфраструктурная, а не «пробы прошли». /dev/full есть не
+# везде (контейнеры без полного /dev), поэтому случай условный.
+if [ -c /dev/full ]; then
+  expect 3 'не удалось записать' -- env REDTEAM_CONFIG="$HERE/testdata/echo-pass.yaml" \
+      REDTEAM_JSON=/dev/full sh "$HERE/run.sh"
+fi
+
 expect 1 '' -- test -e "$HERE/results.json"
 
 if [ "$FAILED" -eq 1 ]; then printf 'redteam: ПРОВАЛ\n'; exit 1; fi

@@ -1,10 +1,16 @@
 #!/bin/sh
 # Прогон набора проб по агенту.
 #   sh run.sh
-# Нужны node с npx, python3 и поднятый шлюз вызовов модели на localhost:4000.
+# Нужны node с npx, python3 с PyYAML (pip install -r requirements.txt) и поднятый шлюз
+# вызовов модели на localhost:4000.
 #
 # Коды возврата: 0 всё прошло · 1 часть проб провалена (это результат) · 3 не удалось
 # выполнить (вердикта о модели нет).
+#
+# Поддержанный режим конфига узкий: один целевой провайдер, один промпт-строка, явный
+# список tests, без повторов. Проверяет это preflight.py ДО вызова модели — он же
+# записывает манифест ожиданий, по которому classify.py доказывает, что выполнен
+# именно ожидаемый набор проб. Что именно отклоняется и почему — в README и preflight.py.
 set -u
 HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)
 
@@ -18,14 +24,39 @@ PROMPTFOO_VERSION='0.123.0'
 CONFIG="${REDTEAM_CONFIG:-$HERE/promptfooconfig.yaml}"
 OUT="${REDTEAM_JSON:-$HERE/results.json}"
 
+# Прежний результат по пути публикации удаляется сразу: иначе сорвавшийся прогон оставит
+# файл, который выглядит как свежая выгрузка. Вердикт всё равно выносится не по нему —
+# promptfoo пишет в $WORK, и классификатор читает оттуда.
 rm -f "$OUT" 2>/dev/null || :
+
+WORK=$(mktemp -d) || { printf 'redteam: не создан временный каталог\nREDTEAM_VERDICT=infra\n' >&2; exit 3; }
+trap 'rm -rf "$WORK"' EXIT
+
+# Допуск конфига и манифест ожиданий. Отказ — это код 3 без единого запроса к модели:
+# набор, который нельзя описать списком проб 0..N-1, не измеряется, а не измеряется «как
+# получится». Диагностика preflight уже в stderr, повторять её здесь нечем.
+python3 "$HERE/preflight.py" "$CONFIG" "$WORK/config.yaml" "$WORK/expected.json" \
+        --promptfoo-version "$PROMPTFOO_VERSION" || {
+  printf 'REDTEAM_VERDICT=infra\n' >&2; exit 3; }
 
 # --no-cache обязателен. Кэш promptfoo включён по умолчанию (диск, ~/.promptfoo/cache,
 # срок жизни две недели): без флага первый прогон меряет, а каждый следующий две
 # недели отдаёт запись — и классификатор честно объявляет это INFRA. Обвязка,
 # работающая один раз в две недели, бесполезна в CI.
-npx -y "promptfoo@$PROMPTFOO_VERSION" eval -c "$CONFIG" --no-cache --no-progress-bar -o "$OUT"
+#
+# Прогон идёт по КОПИИ конфига: правка исходного файла во время прогона оставила бы
+# манифест и выгрузку от разных наборов. Выгрузка пишется туда же, во временный каталог:
+# по пути публикации может лежать старый файл, и принять его за свежий результат нельзя.
+npx -y "promptfoo@$PROMPTFOO_VERSION" eval -c "$WORK/config.yaml" --no-cache \
+    --no-progress-bar -o "$WORK/results.json"
 rc=$?
+
+# Публикация результата. Ошибка записи — инфраструктурная: молча оставить вызывающего
+# без выгрузки, о которой он просил, хуже, чем не дать вердикта.
+if [ -f "$WORK/results.json" ]; then
+  cp "$WORK/results.json" "$OUT" || {
+    printf 'redteam: не удалось записать %s\nREDTEAM_VERDICT=infra\n' "$OUT" >&2; exit 3; }
+fi
 
 # Классификатор зовётся ВСЕГДА, в том числе при rc=0: ранний выход пропускал бы проверку
 # на кэш мимо успешного пути, и «все проверки прошли» могло прийти из записи двухнедельной
@@ -36,7 +67,7 @@ rc=$?
 # в stderr попадают чужие тексты ошибок, в том числе ответ модели, и строку
 # `REDTEAM_VERDICT=pass` в них можно подделать. Код классификатора тоже не решает: если
 # сам python не запустится, ненулевой код будет прочитан как провал модели.
-verdict=$(python3 "$HERE/classify.py" "$OUT" "$rc")
+verdict=$(python3 "$HERE/classify.py" "$WORK/results.json" "$rc" --expected "$WORK/expected.json")
 printf '%s\n' "${verdict:-REDTEAM_VERDICT=none}" >&2
 case "$verdict" in
   REDTEAM_VERDICT=infra) exit 3 ;;

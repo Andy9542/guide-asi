@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Классификатор результата promptfoo: три исхода вместо двух.
 
-    python3 classify.py <results.json> <код_возврата_promptfoo>
+    python3 classify.py <results.json> <код_возврата_promptfoo> --expected <manifest.json>
 
 Коды возврата:
     0  набор отработал целиком, все проверки прошли
@@ -17,6 +17,13 @@
 провайдера (замерено на 0.123.0; версия закреплена в run.sh), а падение инструмента,
 ошибка конфига и нехватка памяти дают свои коды. Приняв код процесса за исход, вы
 обвините модель в чужой поломке.
+
+Манифест ожиданий обязателен. Вердикт «набор выполнен целиком» — утверждение об
+ОЖИДАЕМОМ наборе проб, а ожидания нельзя выводить из проверяемой выгрузки: пока
+классификатор сравнивал длину `results` с длиной `config.tests` из того же файла, три
+результата с `testIdx = [0, 0, 0]` читались как полный набор. Манифест (его готовит
+preflight.py по конфигу ДО вызова модели) задаёт индексы 0..N-1, идентичность каждой
+пробы, провайдера и промпт; выгрузка сверяется с ним построчно.
 
 Правило разделения одно: **INFRA — это отсутствие вердикта, а не наличие ошибки.**
 Первая редакция искала непустое поле `error` где угодно в дереве результата и объявляла
@@ -52,6 +59,134 @@ def finish(verdict, message):
 
 def infra(message):
     finish("infra", message)
+
+
+def parse_args(argv):
+    """Разбор командной строки: (выгрузка, код promptfoo, манифест); иначе ValueError."""
+    if len(argv) != 4 or argv[2] != "--expected":
+        raise ValueError("ожидались <results.json> <код_возврата_promptfoo> "
+                         "--expected <manifest.json>")
+    return argv[0], int(argv[1]), argv[3]
+
+
+def load_manifest(path):
+    """Манифест ожиданий от preflight.py; ValueError, если это не он."""
+    with open(path, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    if not isinstance(manifest, dict) or manifest.get("version") != 1:
+        raise ValueError("это не манифест ожиданий версии 1")
+    provider = manifest.get("provider")
+    if not isinstance(provider, dict) or not isinstance(provider.get("id"), str) \
+            or not isinstance(provider.get("label"), str):
+        raise ValueError("в манифесте нет провайдера {id, label}")
+    if not isinstance(manifest.get("prompt"), str):
+        raise ValueError("в манифесте нет промпта")
+    tests = manifest.get("tests")
+    if not isinstance(tests, list) or not tests or not all(
+            isinstance(t, dict) and isinstance(t.get("vars"), dict)
+            and isinstance(t.get("assert"), list) for t in tests):
+        raise ValueError("в манифесте нет непустого списка проб с vars и assert")
+    return manifest
+
+
+def canon(value):
+    """Каноническая запись значения: сравнение не зависит от порядка ключей."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def check_prompts(prompts, manifest):
+    """results.prompts — ровно одна пара «промпт × провайдер», и та самая."""
+    if not isinstance(prompts, list) or len(prompts) != 1:
+        count = len(prompts) if isinstance(prompts, list) else prompts
+        infra(f"в results.prompts записей: {count} — ожидалась ровно одна пара "
+              "«промпт × провайдер»")
+    entry = prompts[0]
+    provider = manifest["provider"]["label"] or manifest["provider"]["id"]
+    if not isinstance(entry, dict) or entry.get("raw") != manifest["prompt"] \
+            or entry.get("provider") != provider:
+        raw = entry.get("raw") if isinstance(entry, dict) else entry
+        infra(f"results.prompts[0] описывает не проверенную пару «промпт × провайдер»: "
+              f"raw={raw!r}")
+
+
+def row_index(position, row, count):
+    """Номер пробы, к которой относится строка выгрузки."""
+    index = row.get("testIdx")
+    if type(index) is not int or not 0 <= index < count:
+        infra(f"#{position}: testIdx {index!r} вне 0..{count - 1} — строка не относится "
+              "к ожидаемому набору проб")
+    return index
+
+
+def check_identity(position, row, manifest):
+    """Строка должна быть из единственной поддержанной пары «промпт × провайдер»."""
+    if row.get("promptIdx") != 0:
+        infra(f"#{position}: promptIdx {row.get('promptIdx')!r} — строка из второй пары "
+              "«промпт × провайдер», набор шире проверенного")
+    provider = row.get("provider")
+    expected = manifest["provider"]
+    if not isinstance(provider, dict) or provider.get("id") != expected["id"] \
+            or (provider.get("label") or "") != expected["label"]:
+        infra(f"#{position}: провайдер строки не тот, что проверен preflight "
+              f"(ожидался {expected['id']!r})")
+    prompt = row.get("prompt")
+    if not isinstance(prompt, dict) or prompt.get("label") != manifest["prompt"]:
+        infra(f"#{position}: промпт строки не тот, что проверен preflight")
+
+
+def check_test_case(position, row, expected):
+    """Идентичность пробы: те же vars и те же assert, что зафиксировал preflight."""
+    case = row.get("testCase")
+    if not isinstance(case, dict):
+        infra(f"#{position}: в строке нет testCase — идентичность пробы не подтверждена")
+    if "provider" in case:
+        infra(f"#{position}: в testCase есть provider — проба ушла не целевому провайдеру")
+    if canon(case.get("vars") or {}) != canon(expected["vars"]):
+        infra(f"#{position}: vars пробы не те, что в манифесте — выгрузка из другого набора")
+    if canon(case.get("assert") or []) != canon(expected["assert"]):
+        infra(f"#{position}: assert пробы не те, что в манифесте — проверяли другое")
+
+
+def check_row(position, row, manifest):
+    """Одна строка выгрузки против манифеста; возвращает номер её пробы."""
+    if not isinstance(row, dict):
+        infra(f"#{position}: результат не объект ({type(row).__name__})")
+    index = row_index(position, row, len(manifest["tests"]))
+    check_identity(position, row, manifest)
+    check_test_case(position, row, manifest["tests"][index])
+    return index
+
+
+def check_expected(blob, manifest):
+    """Тот ли это набор проб и весь ли он выполнен — до разбора самих вердиктов."""
+    count = len(manifest["tests"])
+    section = blob.get("results", {})
+    check_prompts(section.get("prompts"), manifest)
+
+    tests = blob.get("config", {}).get("tests")
+    if not isinstance(tests, list) or not tests:
+        infra("в выгрузке нет списка проб — файл проб не найден или конфиг не прочитан")
+    if len(tests) != count:
+        infra(f"в выгрузке {len(tests)} проб(ы), в манифесте {count} — прогон шёл "
+              "не по проверенному конфигу")
+
+    results = section.get("results")
+    done = len(results) if isinstance(results, list) else 0
+    if done < count:
+        infra(f"выполнено {done} проб(ы) из {count} — вердикт по части набора не выносится")
+    if done > count:
+        infra(f"строк в выгрузке {done} при {count} пробах — набор шире ожидаемого "
+              "(повторы, второй промпт или провайдер)")
+
+    seen = set()
+    for position, row in enumerate(results):
+        index = check_row(position, row, manifest)
+        if index in seen:
+            infra(f"#{position}: testIdx {index} повторяется — одна проба зачтена дважды, "
+                  "другая не выполнена")
+        seen.add(index)
+    if seen != set(range(count)):
+        infra(f"покрыты не все пробы: нет индексов {sorted(set(range(count)) - seen)}")
 
 
 def verdict_of(result):
@@ -94,28 +229,31 @@ def why_missing(result):
 
 def main():
     try:
-        path, process_code = sys.argv[1], int(sys.argv[2])
+        path, process_code, manifest_path = parse_args(sys.argv[1:])
+    except ValueError as exc:
+        infra(f"вызов неверен: {exc}; без манифеста ожиданий сверять не с чем")
+    try:
+        manifest = load_manifest(manifest_path)
+    except Exception as exc:
+        infra(f"манифест ожиданий не прочитан ({type(exc).__name__}) — сверять не с чем; "
+              "манифест готовит preflight.py до вызова модели")
+    try:
         with open(path, encoding="utf-8") as fh:
             blob = json.load(fh)
     except Exception as exc:
-        infra(f"вывод promptfoo не прочитан ({type(exc).__name__}) — судить нечем; "
-              "ожидались аргументы <results.json> <код_возврата_promptfoo>")
+        infra(f"вывод promptfoo не прочитан ({type(exc).__name__}) — судить нечем")
 
     # Любая неожиданная форма JSON — это тоже отсутствие вердикта, а не падение с
     # traceback: вызывающий разбирает исходы по коду, а не по тексту в stderr.
     # SystemExit не наследует Exception, поэтому вынесенные вердикты проходят насквозь.
     try:
-        tests = blob.get("config", {}).get("tests")
-        if not isinstance(tests, list) or not tests:
-            infra("в выгрузке нет списка проб — файл проб не найден или конфиг не прочитан")
+        # Охват: тот ли набор проб и весь ли он выполнен. До этой проверки вердикты
+        # отдельных проб не разбираются — судить об исходе по чужому набору нельзя.
+        check_expected(blob, manifest)
 
-        section = blob.get("results", {})
-        results = section.get("results")
-        done = len(results) if isinstance(results, list) else 0
-
-        # Полнота. Вердикт по части набора — вердикт без охвата.
-        if done < len(tests):
-            infra(f"выполнено {done} проб(ы) из {len(tests)} — вердикт по части набора не выносится")
+        section = blob["results"]
+        results = section["results"]
+        done = len(results)
 
         # Кэш. Кэшированный ответ модели — тот же мок: вердикт о стойкости, вынесенный по
         # записи двухнедельной давности, ничего не проверяет. run.sh передаёт --no-cache,
