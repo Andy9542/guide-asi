@@ -20,6 +20,9 @@ public = signing.load_public(f"{keys}/bus_public.pem")
 
 #: Получатель, от имени которого здесь проверяются конверты.
 ME = "validator"
+#: Один guard на получателя на весь поток сообщений — а не новый на каждый вызов:
+#: guard, созданный на вызов, помнит один конверт и повтор не отличает от первого.
+GUARD = signing.ReplayGuard()
 
 task = {"task_id": "pay-1842", "action": "validate_transfer", "amount": 1250}
 
@@ -42,34 +45,51 @@ smuggled["approved_by"] = "security-team"
 no_recipient = copy.deepcopy(legit)
 del no_recipient["recipient"]
 
+# Положительные сценарии после первого — на свежих конвертах: nonce у legit один, и
+# GUARD его уже запомнил.
+fresh = signing.make_envelope(task, "orchestrator", ME, private_key=private)
+
 checks = [
     ("подписанное настоящим ключом принимается",
-     signing.verify(legit, public, recipient=ME) is True),
+     signing.verify(legit, public, recipient=ME, guard=GUARD) is True),
     ("неподписанное отвергается",
-     signing.verify(unsigned, public, recipient=ME) is False),
+     signing.verify(unsigned, public, recipient=ME, guard=GUARD) is False),
     ("подписанное чужим ключом отвергается",
-     signing.verify(forged, public, recipient=ME) is False),
+     signing.verify(forged, public, recipient=ME, guard=GUARD) is False),
     ("изменённая полезная нагрузка отвергается",
-     signing.verify(tampered_payload, public, recipient=ME) is False),
+     signing.verify(tampered_payload, public, recipient=ME, guard=GUARD) is False),
     ("изменённое поле meta отвергается",
-     signing.verify(tampered_meta, public, recipient=ME) is False),
+     signing.verify(tampered_meta, public, recipient=ME, guard=GUARD) is False),
     ("дописанное поле верхнего уровня отвергается",
-     signing.verify(smuggled, public, recipient=ME) is False),
+     signing.verify(smuggled, public, recipient=ME, guard=GUARD) is False),
     ("конверт для другого получателя отвергается",
-     signing.verify(legit, public, recipient="executor") is False),
+     signing.verify(legit, public, recipient="executor", guard=GUARD) is False),
     ("конверт без адресата отвергается",
-     signing.verify(no_recipient, public, recipient=ME) is False),
+     signing.verify(no_recipient, public, recipient=ME, guard=GUARD) is False),
     ("конверт, прошедший через json, принимается",
-     signing.verify(json.loads(json.dumps(legit)), public, recipient=ME) is True),
+     signing.verify(json.loads(json.dumps(fresh)), public, recipient=ME,
+                    guard=GUARD) is True),
 ]
 
-# Повтор: тот же конверт, поданный дважды, второй раз не принимается.
-guard = signing.ReplayGuard()
-first = signing.verify(copy.deepcopy(legit), public, recipient=ME, guard=guard)
-second = signing.verify(copy.deepcopy(legit), public, recipient=ME, guard=guard)
+# Повтор: тот же конверт, поданный дважды одному GUARD, второй раз не принимается.
+replayed = signing.make_envelope(task, "orchestrator", ME, private_key=private)
+first = signing.verify(replayed, public, recipient=ME, guard=GUARD)
+second = signing.verify(copy.deepcopy(replayed), public, recipient=ME, guard=GUARD)
 checks.append(("повтор того же конверта отвергается", first is True and second is False))
 
-# Переполнение: заполненный guard отказывает, а не вытесняет свежие записи.
+# Без guard сообщение не допускается: TypeError, а не молчаливое True (R5).
+no_guard = []
+for kwargs in ({}, {"guard": None}):
+    try:
+        signing.verify(fresh, public, recipient=ME, **kwargs)
+        no_guard.append("принято")
+    except TypeError:
+        no_guard.append("TypeError")
+checks.append(("verify без guard — TypeError, а не пропуск повтора",
+               no_guard == ["TypeError", "TypeError"]))
+
+# Переполнение: заполненный guard отказывает, а не вытесняет свежие записи. Здесь
+# намеренно отдельный guard с крошечным limit — GUARD получателя не заполнить.
 small = signing.ReplayGuard(limit=3)
 burst = [signing.verify(signing.make_envelope(task, "orchestrator", ME,
                                               private_key=private),
@@ -83,7 +103,7 @@ bad_ts = [True, float("nan"), 10 ** 400]
 checks.append(("нечисловое и невозможное время отвергается", all(
     signing.verify(signing.make_envelope(task, "orchestrator", ME,
                                          private_key=private, ts=value),
-                   public, recipient=ME, guard=signing.ReplayGuard()) is False
+                   public, recipient=ME, guard=GUARD) is False
     for value in bad_ts)))
 
 # Враждебный вход: verify обязан вернуть False, а не выбросить исключение.
@@ -106,8 +126,7 @@ hostile = [
 ok = True
 for bad in hostile:
     try:
-        if signing.verify(bad, public, recipient=ME,
-                          guard=signing.ReplayGuard()) is not False:
+        if signing.verify(bad, public, recipient=ME, guard=GUARD) is not False:
             ok = False
     except Exception as exc:                      # noqa: BLE001 — здесь ловим намеренно
         print(f"  ИСКЛЮЧЕНИЕ на {bad!r}: {type(exc).__name__}")

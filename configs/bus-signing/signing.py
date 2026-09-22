@@ -27,6 +27,7 @@ import heapq
 import json
 import math
 import secrets
+import threading
 import time
 
 from cryptography.exceptions import InvalidSignature
@@ -100,9 +101,12 @@ class ReplayGuard:
     Держит окно свежести и множество увиденных nonce; limit — жёсткий потолок памяти:
     заполненный guard отказывает (fail closed), а не вытесняет записи, иначе поток
     свежих конвертов вымывает из памяти тот самый nonce, ради которого всё и заведено.
-    В продакшене состояние должно быть общим для всех экземпляров получателя и
-    переживать перезапуск — иначе рестарт открывает окно для повтора. Здесь оно в
-    памяти: этого хватает для одного процесса и честно называется своим именем.
+    Один guard на получателя, и он живёт столько же, сколько получатель: guard, созданный
+    на каждый вызов, помнит ровно один конверт и повтор не отличает от первого предъявления.
+    Проверка nonce и его регистрация — одна критическая секция под блокировкой: два потока,
+    одновременно предъявившие один конверт, иначе оба прошли бы проверку до регистрации.
+    Граница гарантии — потоки одного процесса. Нескольким процессам и перезапуску нужно
+    общее хранилище, переживающее рестарт; здесь его нет, и это названо честно.
     """
 
     def __init__(self, window_seconds: float = 300.0, limit: int = 100_000,
@@ -114,9 +118,13 @@ class ReplayGuard:
         #: Куча (ts + window, nonce): просроченные выталкиваются за O(log n), а не
         #: пересборкой всего множества.
         self._expiry: list[tuple[float, str]] = []
+        #: Lock, не RLock: внутри секции считается len(self._seen), а не len(self) —
+        #: повторный вход за той же блокировкой дал бы тупик.
+        self._lock = threading.Lock()
 
     def __len__(self) -> int:
-        return len(self._seen)
+        with self._lock:
+            return len(self._seen)
 
     def accept(self, envelope: dict, *, now: float | None = None) -> bool:
         now = time.time() if now is None else now
@@ -134,24 +142,28 @@ class ReplayGuard:
         # ts из будущего дальше skew отвергается: иначе его запись жила бы до 2·window.
         if not math.isfinite(ts) or ts > now + self.skew or now - ts > self.window:
             return False
-        while self._expiry and self._expiry[0][0] < now:
-            _, expired = heapq.heappop(self._expiry)
-            self._seen.discard(expired)
-        if nonce in self._seen or len(self._seen) >= self.limit:
-            return False
-        self._seen.add(nonce)
-        heapq.heappush(self._expiry, (ts + self.window, nonce))
-        return True
+        # Очистка, проверка nonce и лимита, регистрация — одной секцией: между «не видел»
+        # и «запомнил» другой поток не должен успеть пройти ту же проверку.
+        with self._lock:
+            while self._expiry and self._expiry[0][0] < now:
+                _, expired = heapq.heappop(self._expiry)
+                self._seen.discard(expired)
+            if nonce in self._seen or len(self._seen) >= self.limit:
+                return False
+            self._seen.add(nonce)
+            heapq.heappush(self._expiry, (ts + self.window, nonce))
+            return True
 
 
-def verify(envelope: dict, public_key: Ed25519PublicKey, *, recipient: str,
-           guard: "ReplayGuard | None" = None) -> bool:
-    """True только для присутствующей, верной, адресованной вам и не повторной подписи.
+def verify_signature(envelope: dict, public_key: Ed25519PublicKey, *,
+                     recipient: str) -> bool:
+    """True для присутствующей, верной и адресованной вам подписи. Повтор НЕ отсекает.
 
-    recipient — кто проверяет: конверт, выписанный другому получателю, отвергается.
-    Никогда не выбрасывает исключение на враждебном входе: любой мусор — это False.
-    Ошибка вызывающего — другое дело: без recipient проверка бессмысленна, поэтому
-    здесь TypeError, а не молчаливое True.
+    Ограниченный контракт: тот же конверт пройдёт здесь сколько угодно раз. Это
+    проверка «кто отправил и кому», а не допуск сообщения к обработке — для допуска
+    есть verify(), и она требует guard. Никогда не выбрасывает исключение на враждебном
+    входе: любой мусор — это False. Ошибка вызывающего — другое дело: без recipient
+    проверка бессмысленна, поэтому здесь TypeError, а не молчаливое True.
     """
     if not isinstance(recipient, str) or not recipient:
         raise TypeError("recipient: непустая строка — имя того, кто проверяет конверт")
@@ -169,6 +181,24 @@ def verify(envelope: dict, public_key: Ed25519PublicKey, *, recipient: str,
     # это тоже мусор на входе, а не повод для исключения.
     except (InvalidSignature, ValueError, TypeError, RecursionError):
         return False
-    if guard is not None and not guard.accept(envelope):
-        return False
     return True
+
+
+def verify(envelope: dict, public_key: Ed25519PublicKey, *, recipient: str,
+           guard: ReplayGuard) -> bool:
+    """True только для присутствующей, верной, адресованной вам и не повторной подписи.
+
+    guard — общий долгоживущий ReplayGuard получателя, один на получателя внутри
+    процесса; без него (None) повтор неотличим от первого предъявления, поэтому это
+    TypeError — ошибка интеграции, а не свойство конверта. Проверяется только None:
+    guard — контракт accept(envelope), а не isinstance, и любой объект с этим методом
+    подойдёт. Подпись проверяется до guard.accept(): поддельный конверт с чужим nonce
+    не занимает место и не блокирует легитимный. Враждебный конверт — всегда False,
+    никогда не исключение.
+    """
+    if guard is None:
+        raise TypeError("guard: общий ReplayGuard получателя — без него повтор не отсечь; "
+                        "для проверки только подписи есть verify_signature()")
+    if not verify_signature(envelope, public_key, recipient=recipient):
+        return False
+    return guard.accept(envelope)

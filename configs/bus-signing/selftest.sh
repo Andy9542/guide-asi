@@ -57,9 +57,15 @@ expect 2 ''               -- sh "$HERE/keygen.sh" -x
 expect 0 '' -- "$PY" "$HERE/verify_demo.py" "$TMP/keys"
 never 'ПРОВАЛ'
 never 'ИСКЛЮЧЕНИЕ'
-# Тринадцать проверок, а не «сколько-то»: молча выпавшая проверка — не зелёный прогон.
-expect 0 '' -- sh -c '"$1" "$2" "$3" | grep -c "^\[ok\]" | grep -x 13' sh \
+# Четырнадцать проверок, а не «сколько-то»: молча выпавшая проверка — не зелёный прогон.
+expect 0 '' -- sh -c '"$1" "$2" "$3" | grep -c "^\[ok\]" | grep -x 14' sh \
   "$PY" "$HERE/verify_demo.py" "$TMP/keys"
+
+# Регрессии R5/R6: guard обязателен, ReplayGuard атомарен между потоками. unittest пишет
+# «OK» и «Ran N tests» в stderr; expect собирает 2>&1. Восемь тестов, а не «сколько-то».
+expect 0 'OK' -- "$PY" "$HERE/signing_test.py"
+saw 'Ran 8 tests'
+never 'FAILED'
 
 # Ключи README велит класть вне дерева репозитория; selftest тем более.
 expect 1 '' -- test -e "$HERE/keys"
