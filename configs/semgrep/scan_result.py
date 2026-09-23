@@ -6,13 +6,16 @@
 Зачем отдельный разбор. «Ноль находок» и «файл не читали» в выводе Semgrep выглядят
 одинаково: пропуск по размеру и тайм-аут правила оставляют код 0. Поэтому охват
 считается не по отчёту, а по каталогу на хосте: каждый файл профиля обязан оказаться
-в `paths.scanned`, а любая запись в `errors[]` означает, что вердикта нет.
+в `paths.scanned`, а любая запись в `errors[]` означает, что вердикта нет. Сам обход
+каталога тоже бывает неполным — недоступный подкаталог молча сузил бы список ожидаемых
+файлов, поэтому ошибки обхода собираются как пробелы и считаются неполнотой.
 
 stdout — ровно одна строка `scan_result: …`, всё остальное в stderr. Коды:
   0  ЧИСТО      охват полный, блокирующих находок нет
   1  НАХОДКА    есть ERROR; находка важнее неполноты, но неполнота названа в строке
   2  неверный вызов
-  3  НЕПОЛНО    вердикта нет: пропуск, тайм-аут, ошибка разбора, симлинк, битый отчёт
+  3  НЕПОЛНО    вердикта нет: пропуск, тайм-аут, ошибка разбора, симлинк, битый
+                отчёт, каталог без доступа — на хосте или у самого сканера
   4  НЕТ ВХОДА  в каталоге нет ни одного файла профиля
 """
 import json
@@ -23,6 +26,12 @@ import sys
 # 1.176.1 берёт в работу по правилу `languages: [javascript]`.
 JS_EXTS = ('.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx')
 MOUNT = '/src'  # каталог проекта монтируется в контейнер сюда
+# Причины из paths.skipped, за которыми сканер файла не получил вовсе: за таким путём
+# могут стоять файлы профиля, и «ноль находок» по ним ничего не значит. Остальные
+# причины (тот же exceeded_size_limit у файла вне профиля) охват не сужают. В перечне
+# SkipReason образа 1.176.1 из этих двух есть только первая; вторая — тот же класс
+# отказа, и держится здесь на случай смены образа.
+ACCESS_REASONS = ('insufficient_permissions', 'nonexistent_file')
 SHOWN = 5       # сколько путей и ошибок перечислять в строке вердикта
 
 
@@ -32,23 +41,35 @@ class Incomplete(Exception):
 
 def mounted(project_dir: str, path: str) -> str:
     """Путь на хосте → путь, под которым тот же файл виден Semgrep в контейнере."""
-    return MOUNT + '/' + os.path.relpath(path, project_dir).replace(os.sep, '/')
+    rel = os.path.relpath(path, project_dir).replace(os.sep, '/')
+    return MOUNT if rel == '.' else MOUNT + '/' + rel
 
 
-def inventory(project_dir: str) -> set[str]:
-    """Файлы профиля в каталоге. Симлинк не разрешается: это заявленная граница."""
-    found = set()
-    for root, dirs, files in os.walk(project_dir, followlinks=False):
+def inventory(project_dir: str) -> tuple[set[str], list[str]]:
+    """Файлы профиля в каталоге и пробелы обхода — то, что прочитать не удалось.
+
+    Пробел возвращается, а не бросается: иначе подтверждённая находка не смогла бы
+    перекрыть неполноту, а приоритет исходов 1 > 3 держится именно на этом. Каталог
+    без доступа сузил бы список ожидаемых файлов молча, и сверка с `paths.scanned`
+    сошлась бы сама с собой. Симлинк не разрешается — это заявленная граница.
+    """
+    found, gaps = set(), []
+
+    def on_error(exc: OSError) -> None:
+        gaps.append('каталог не прочитан: %s (%s)'
+                    % (mounted(project_dir, exc.filename), exc.strerror))
+
+    for root, dirs, files in os.walk(project_dir, onerror=on_error, followlinks=False):
         if '.git' in dirs:
             dirs.remove('.git')
         for name in dirs + files:
             path = os.path.join(root, name)
             if os.path.islink(path):
-                raise Incomplete('симлинк в каталоге: %s' % mounted(project_dir, path))
+                gaps.append('симлинк в каталоге: %s' % mounted(project_dir, path))
         for name in files:
             if name.endswith(JS_EXTS):
                 found.add(mounted(project_dir, os.path.join(root, name)))
-    return found
+    return found, gaps
 
 
 def load_report(path: str) -> dict:
@@ -97,13 +118,33 @@ def error_text(err: object) -> str:
 
 
 def skip_reasons(report: dict) -> dict:
-    """path → причина пропуска. Ключ `skipped` Semgrep пишет только с --verbose."""
+    """path → причина пропуска. Ключ `skipped` Semgrep пишет только с --verbose.
+
+    Испорченный список — не «пропусков нет»: по нему читаются причины отсутствия
+    доступа, и молчание здесь превратило бы закрытый каталог в «чисто».
+    """
     skipped = report['paths'].get('skipped')
-    if not isinstance(skipped, list):
+    if skipped is None:
         return {}
-    return {item['path']: item['reason'] for item in skipped
-            if isinstance(item, dict) and isinstance(item.get('path'), str)
-            and isinstance(item.get('reason'), str)}
+    if not isinstance(skipped, list):
+        raise Incomplete('в отчёте paths.skipped не список, а %s' % type(skipped).__name__)
+    reasons = {}
+    for item in skipped:
+        if (not isinstance(item, dict) or not isinstance(item.get('path'), str)
+                or not isinstance(item.get('reason'), str)):
+            raise Incomplete('в paths.skipped запись без path или reason')
+        reasons[item['path']] = item['reason']
+    return reasons
+
+
+def no_access(reasons: dict[str, str], missing: list[str]) -> list[str]:
+    """`путь (причина)` для путей, которых сканер не получил по отсутствию доступа.
+
+    Semgrep не от root сообщает о недоступном каталоге сам, и на другой машине обход
+    мог этот каталог увидеть — тогда разности expected/scanned для него нет.
+    """
+    return ['%s (%s)' % (path, reason) for path, reason in sorted(reasons.items())
+            if reason in ACCESS_REASONS and path not in missing]
 
 
 def shorten(items: list[str], total: int) -> str:
@@ -111,19 +152,22 @@ def shorten(items: list[str], total: int) -> str:
     return ', '.join(items[:SHOWN]) + tail
 
 
-def incompleteness(expected: set[str], report: dict) -> list[str]:
-    """Причины, по которым охват нельзя назвать полным."""
+def incompleteness(expected: set[str], report: dict, walk_gaps: list[str]) -> list[str]:
+    """Причины, по которым охват нельзя назвать полным: сначала обход, потом отчёт."""
     scanned = report['paths']['scanned']
     for path in scanned:
         if not isinstance(path, str):
             raise Incomplete('в paths.scanned не строка, а %s' % type(path).__name__)
-    gaps = []
+    gaps = list(walk_gaps)
+    reasons = skip_reasons(report)
     missing = sorted(expected - set(scanned))
     if missing:
-        reasons = skip_reasons(report)
         named = ['%s (%s)' % (p, reasons[p]) if p in reasons else p for p in missing]
         gaps.append('не просканировано %d из %d файлов профиля: %s'
                     % (len(missing), len(expected), shorten(named, len(missing))))
+    denied = no_access(reasons, missing)
+    if denied:
+        gaps.append('пропущено сканером без доступа: %s' % shorten(denied, len(denied)))
     errors = report['errors']
     if errors:
         gaps.append('ошибки сканера: %s'
@@ -144,7 +188,8 @@ def where(result: dict) -> str:
                            line if isinstance(line, int) else '?')
 
 
-def classify(expected: set[str], report: dict, rc: int) -> tuple[int, str, list]:
+def classify(expected: set[str], report: dict, rc: int,
+             walk_gaps: list[str]) -> tuple[int, str, list]:
     """(код, строка вердикта без префикса, блокирующие находки). Находка важнее неполноты.
 
     Находки возвращаются, а не пересчитываются вызывающим: их список нужен и для
@@ -153,7 +198,7 @@ def classify(expected: set[str], report: dict, rc: int) -> tuple[int, str, list]
     if rc not in (0, 1):
         return 3, 'НЕПОЛНО — semgrep завершился кодом %d' % rc, []
     findings = findings_of(report)
-    gaps = incompleteness(expected, report)
+    gaps = incompleteness(expected, report, walk_gaps)
     if rc == 1 and findings:
         line = 'НАХОДКА — блокирующих находок %d' % len(findings)
         return 1, line + (' — неполно: %s' % '; '.join(gaps) if gaps else ''), findings
@@ -180,9 +225,9 @@ def main(argv: list[str]) -> int:
         print('scan_result: каталог не найден: %s' % project_dir, file=sys.stderr)
         return 2
     try:
-        expected = inventory(project_dir)
+        expected, walk_gaps = inventory(project_dir)
         report = load_report(report_path)
-        code, line, findings = classify(expected, report, int(rc_text))
+        code, line, findings = classify(expected, report, int(rc_text), walk_gaps)
     except Incomplete as exc:
         code, line = 3, 'НЕПОЛНО — %s' % exc
     else:

