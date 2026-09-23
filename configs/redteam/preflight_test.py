@@ -256,7 +256,9 @@ def check_snapshot(name, *, work):
     with open(source, "wb") as fh:
         fh.write(MINIMAL.encode("utf-8"))
     edit = b"evaluateOptions:\n  repeat: 2\n"
-    parse = preflight.parse_yaml
+    parse = getattr(preflight, "parse_yaml", None)
+    if parse is None:  # код до снимка: разбор читает файл сам, вклиниться между этапами нечем
+        return report(name, ["в preflight нет parse_yaml — разбор и копия читают исходник порознь"])
 
     def parse_then_edit(text):
         result = parse(text)
