@@ -28,6 +28,10 @@ tests, без повторов и списков в vars. Всё перечис�
 списком 0..N-1 — для такой матрицы нужна отдельная реализация ожиданий. Отдельный
 судья в `defaultTest.options.provider` разрешён: он не цель прогона.
 
+Готовый ответ в пробе (`providerOutput`) не принимается: promptfoo подставляет его
+вместо вызова провайдера, и «набор выполнен, все проверки прошли» приходит из конфига,
+а не от цели. Поймать это по выгрузке нечем — ответ не кэшированный.
+
 Ключей доступа манифест не содержит: в него попадают только vars, assert, идентичность
 провайдера и текст промпта.
 """
@@ -46,6 +50,15 @@ except ImportError:
 
 # Ключи, которые меняют состав набора или пишут файлы мимо -o.
 UNSUPPORTED_KEYS = ("scenarios", "extensions", "outputPath")
+
+# Ключи пробы, которые promptfoo понимает, а поддержанный режим не принимает. Запрет один
+# на defaultTest и на tests[]: в 0.123.0 пробе наследуются vars, assert и options, но
+# состав наследуемого — свойство версии, а не контракт, и два списка запретов разъедутся.
+UNSUPPORTED_TEST_KEYS = {
+    "provider": "переопределяет цель — прогон пойдёт не по проверенному провайдеру",
+    "providerOutput": "подставляет готовый ответ вместо вызова модели — прогон не измеряет "
+                      "цель, а перечитывает конфиг",
+}
 
 # Плоский (без кавычек) скаляр читается по-разному YAML 1.1 (PyYAML, здесь) и YAML 1.2
 # (js-yaml внутри promptfoo): `yes` → True или "yes", `010` → 8 или 10, `2026-09-22` →
@@ -161,14 +174,19 @@ def asserts_of(section, where):
     return value
 
 
+def reject_unsupported_test_keys(section, where):
+    """Ключи пробы вне поддержанного режима: одна проверка на defaultTest и на tests[]."""
+    for key, why in UNSUPPORTED_TEST_KEYS.items():
+        if key in section:
+            raise Unsupported(f"{where}.{key} {why}")
+
+
 def expected_tests(cfg):
     """Ожидаемые пробы в порядке конфига: индекс пробы — её место в этом списке."""
     default = cfg.get("defaultTest") or {}
     if not isinstance(default, dict):
         raise Unsupported(f"defaultTest не отображение ({type(default).__name__})")
-    if "provider" in default:
-        raise Unsupported("defaultTest.provider переопределяет цель — прогон пойдёт "
-                          "не по проверенному провайдеру")
+    reject_unsupported_test_keys(default, "defaultTest")
     common = asserts_of(default, "defaultTest")
     tests = cfg.get("tests")
     if not isinstance(tests, list) or not tests:
@@ -180,9 +198,7 @@ def expected_tests(cfg):
         if not isinstance(test, dict):
             raise Unsupported(f"{where} не отображение ({type(test).__name__}) — "
                               "внешние и сгенерированные пробы не поддержаны")
-        if "provider" in test:
-            raise Unsupported(f"{where}.provider переопределяет цель — часть проб уйдёт "
-                              "не тому провайдеру")
+        reject_unsupported_test_keys(test, where)
         expected.append({"vars": merged_vars(default.get("vars"), test.get("vars"), where),
                          "assert": [*common, *asserts_of(test, where)]})
     return expected

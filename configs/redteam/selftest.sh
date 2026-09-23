@@ -74,6 +74,16 @@ saw 'ровно один целевой провайдер'
 never 'Writing output to'
 expect 1 '' -- test -e "$TMP/unsupported.json"
 
+# Готовый ответ в пробе (`providerOutput`) promptfoo подставляет вместо вызова провайдера:
+# набор «выполнен целиком», все проверки «прошли», цель не спрошена ни разу, и ответ при
+# этом не кэшированный. Отклоняется ДО вызова promptfoo. Контроль пары — прогон по
+# мёртвому шлюзу выше: тот же провайдер без подстановки даёт INFRA.
+expect 3 'providerOutput' -- env REDTEAM_CONFIG="$HERE/testdata/provider-output.yaml" \
+    REDTEAM_JSON="$TMP/po.json" sh "$HERE/run.sh"
+saw 'REDTEAM_VERDICT=infra'
+never 'Writing output to'
+expect 1 '' -- test -e "$TMP/po.json"
+
 # Выгрузка удачного прогона, оставленная по пути публикации, не становится результатом
 # следующего: прогон отклонён, старый файл убран, вердикт — 3.
 cp "$TMP/pass.json" "$TMP/stale.json" || infra 'нет выгрузки удачного прогона — проверять устаревание нечем'

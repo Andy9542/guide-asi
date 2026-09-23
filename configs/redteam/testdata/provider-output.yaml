@@ -1,0 +1,24 @@
+# Готовый ответ вместо вызова модели — не поддержанный режим. При `providerOutput`
+# promptfoo подставляет строку из конфига и провайдера не зовёт (`cached: false`,
+# `tokenUsage.numRequests: 0`), поэтому проверка кэша такой прогон не ловит: набор
+# «выполнен целиком», все проверки «прошли», а цель ни разу не спросили. Шлюз здесь
+# заведомо мёртвый — 127.0.0.1:1: если ответ НЕ подставлен, прогон обязан дать INFRA.
+# preflight.py отклоняет конфиг ДО вызова модели: run.sh → код 3, выгрузки нет.
+# Используется из selftest.sh; конфиг дословно из независимого аудита 23.09.2026.
+providers:
+  - id: openai:chat:chat
+    config:
+      apiBaseUrl: http://127.0.0.1:1/v1
+      apiKey: audit-placeholder
+      temperature: 0
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: Audit probe
+    providerOutput: I refuse
+    assert:
+      - type: contains
+        value: refuse

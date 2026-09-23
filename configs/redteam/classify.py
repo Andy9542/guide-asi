@@ -31,7 +31,7 @@ preflight.py по конфигу ДО вызова модели) задаёт и
 проверки — то есть настоящий провал пробы (модель поддалась) уезжал в «не смогли
 измерить». Ошибка в опасную сторону: сработавшая атака выглядела как сбой стенда.
 Поэтому смотрим не на наличие текста ошибки, а на наличие явного булева вердикта у
-каждого теста.
+каждого теста и у каждого компонента его проверки.
 """
 import json
 import os
@@ -141,6 +141,9 @@ def check_test_case(position, row, expected):
         infra(f"#{position}: в строке нет testCase — идентичность пробы не подтверждена")
     if "provider" in case:
         infra(f"#{position}: в testCase есть provider — проба ушла не целевому провайдеру")
+    if "providerOutput" in case:
+        infra(f"#{position}: в testCase есть providerOutput — ответ взят из конфига, "
+              "модель не вызвана")
     if canon(case.get("vars") or {}) != canon(expected["vars"]):
         infra(f"#{position}: vars пробы не те, что в манифесте — выгрузка из другого набора")
     if canon(case.get("assert") or []) != canon(expected["assert"]):
@@ -189,6 +192,23 @@ def check_expected(blob, manifest):
         infra(f"покрыты не все пробы: нет индексов {sorted(set(range(count)) - seen)}")
 
 
+def component_problem(check):
+    """Почему компонент проверки не несёт решения, или None.
+
+    Решение компонента с общим не сверяется: пороги и агрегирование promptfoo дают общий
+    PASS при отдельном `pass: false`, и правило «все компоненты true» объявляло бы INFRA
+    поддержанную форму. Проверяется только то, что решение в компоненте вообще есть.
+    """
+    if not isinstance(check, dict):
+        return f"компонент не объект ({type(check).__name__})"
+    meta = check.get("metadata")
+    if isinstance(meta, dict) and meta.get("graderError"):
+        return "у компонента graderError"
+    if not isinstance(check.get("pass"), bool):
+        return f"компонент проверки без булева pass ({check.get('pass')!r})"
+    return None
+
+
 def verdict_of(result):
     """Явный булев вердикт теста или None, если вердикта нет."""
     if not isinstance(result, dict):
@@ -206,10 +226,8 @@ def verdict_of(result):
     components = grading.get("componentResults")
     if not isinstance(components, list) or not components:
         return None                                       # нет ни одной проверки
-    for check in components:
-        meta = check.get("metadata") if isinstance(check, dict) else None
-        if not isinstance(check, dict) or (isinstance(meta, dict) and meta.get("graderError")):
-            return None                                   # судья не вынес решения
+    if any(component_problem(check) is not None for check in components):
+        return None                                       # форма компонента незнакома
     return value
 
 
@@ -224,6 +242,13 @@ def why_missing(result):
         return "в результате нет gradingResult"
     if grading.get("reason") == "No assertions":
         return "у пробы нет ни одной проверки (No assertions)"
+    if not isinstance(grading.get("pass"), bool):
+        return f"судья не вынес решения: gradingResult.pass не булев ({grading.get('pass')!r})"
+    components = grading.get("componentResults")
+    for check in components if isinstance(components, list) else []:
+        why = component_problem(check)
+        if why:
+            return f"судья не вынес решения: {why}"
     return f"судья не вынес решения: {grading.get('reason')}"
 
 

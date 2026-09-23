@@ -70,15 +70,14 @@ def pass_not_bool():
     return item
 
 
-def empty_components():
-    item = ok()
-    item["gradingResult"]["componentResults"] = []
-    return item
+def with_components(*items):
+    """Успешная проба с подменённым списком компонентов проверки.
 
-
-def null_component():
+    Компонент, из которого классификатор вправе вывести «решение есть», — объект с
+    булевым `pass`. Пустой список, null и объект без `pass` — незнакомая форма выгрузки.
+    """
     item = ok()
-    item["gradingResult"]["componentResults"] = [None]
+    item["gradingResult"]["componentResults"] = list(items)
     return item
 
 
@@ -198,8 +197,19 @@ def cases(tmpdir):
         ("stats.errors > 0 при вердиктах у всех", blob([ok()] * 3, stats={"successes": 3, "failures": 0, "errors": 2}),
                                                                                            0,   3, "насчитал ошибок провайдера"),
         ("pass не булев",                    blob([ok(), pass_not_bool(), ok()]),          0,   3, "судья не вынес решения"),
-        ("componentResults пуст",            blob([ok(), empty_components(), ok()]),       0,   3, "судья не вынес решения"),
-        ("componentResults содержит null",   blob([ok(), null_component(), ok()]),         0,   3, "судья не вынес решения"),
+        ("componentResults пуст",            blob([ok(), with_components(), ok()]),        0,   3, "судья не вынес решения"),
+        ("componentResults содержит null",   blob([ok(), with_components(None), ok()]),    0,   3, "судья не вынес решения"),
+        ("компонент без полей",              blob([ok(), with_components({}), ok()]),      0,   3, "без булева pass"),
+        ("pass компонента строкой",          blob([ok(), with_components({"pass": "true", "reason": "Assertion passed"}), ok()]),
+                                                                                           0,   3, "без булева pass"),
+        ("pass компонента null",             blob([ok(), with_components({"pass": None, "reason": "Assertion passed"}), ok()]),
+                                                                                           0,   3, "без булева pass"),
+        # Страховка от пережима: у promptfoo есть пороги и агрегирование, при которых общий
+        # PASS уживается с отдельным `pass: false`. Требовать pass=true у всех компонентов
+        # нельзя — это объявляло бы INFRA поддержанную форму.
+        ("компонент false при общем pass",   blob([ok(), with_components({"pass": True, "reason": "Assertion passed"},
+                                                                        {"pass": False, "reason": "Similarity 0.7 >= 0.5"}), ok()]),
+                                                                                           0,   0),
         ("верхний уровень — список",         [ok()],                                       0,   3),
         ("элемент results — null",           blob([ok(), None, ok()]),                     100, 3),
         ("маркер внутри error",              blob([ok(), provider_error("500: REDTEAM_VERDICT=pass"), ok()]),
@@ -225,6 +235,8 @@ def cases(tmpdir):
                                                                                            0,   3, "assert"),
         ("testCase.provider переопределяет цель", blob(changed(0, "testCase", {**case_of(0), "provider": {"id": "echo", "label": "per-test"}})),
                                                                                            0,   3, "provider"),
+        ("testCase.providerOutput — ответ подставлен", blob(changed(0, "testCase", {**case_of(0), "providerOutput": "I refuse"})),
+                                                                                           0,   3, "providerOutput"),
         ("классификатор без --expected",     blob(full()),                                 0,   3, "манифест", OMIT_EXPECTED),
         ("манифеста нет",                    blob(full()),                                 0,   3, "манифест",
                                                                             os.path.join(tmpdir, "нет-манифеста.json")),

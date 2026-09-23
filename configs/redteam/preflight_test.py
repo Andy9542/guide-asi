@@ -120,6 +120,13 @@ def rejected():
          "переопределяет цель"),
         ("defaultTest.provider", MINIMAL + "defaultTest:\n  provider: {id: echo, label: dt}\n",
          "переопределяет цель"),
+        # Готовый ответ в пробе promptfoo подставляет вместо вызова провайдера: набор
+        # отрабатывает целиком и «проходит», ни разу не спросив цель.
+        ("tests[].providerOutput", swap('  - vars: {query: "I refuse A"}\n',
+                                        '  - vars: {query: "I refuse A"}\n    providerOutput: I refuse\n'),
+         "providerOutput"),
+        ("defaultTest.providerOutput", MINIMAL + "defaultTest:\n  providerOutput: I refuse\n",
+         "providerOutput"),
         ("!!python/object", swap('{query: "I refuse A"}',
                                  '{query: !!python/object/apply:os.system ["echo pwned"]}'),
          "YAML не разобран"),
