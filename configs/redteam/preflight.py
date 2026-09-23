@@ -28,6 +28,17 @@ tests, без повторов и списков в vars. Всё перечис�
 списком 0..N-1 — для такой матрицы нужна отдельная реализация ожиданий. Отдельный
 судья в `defaultTest.options.provider` разрешён: он не цель прогона.
 
+Проверки пробы ограничены профилем: детерминированные сравнения без пути исполнения
+(contains, icontains, not-contains, not-icontains, equals, starts-with, regex, not-regex,
+contains-any, contains-all, icontains-any, icontains-all, is-json) и судья llm-rubric.
+Группа `assert-set`, исполняемые типы (javascript, python) и незнакомые отклоняются ДО
+запуска: пустая группа в 0.123.0 даёт компонент с `pass: true` без единой проверки
+ответа, а сбой исполняемой проверки приходит как обычный `pass: false` без
+`metadata.graderError` — от отрицательного решения о модели его не отличить. Проба, у
+которой после слияния с defaultTest не осталось ни одной проверки, отклоняется там же:
+promptfoo вернул бы «No assertions», и звать модель незачем. `threshold` разрешён —
+агрегирование ИСПРАВНЫХ проверок поддержано.
+
 Готовый ответ в пробе (`providerOutput`) не принимается: promptfoo подставляет его
 вместо вызова провайдера, и «набор выполнен, все проверки прошли» приходит из конфига,
 а не от цели. Поймать это по выгрузке нечем — ответ не кэшированный.
@@ -58,6 +69,38 @@ UNSUPPORTED_TEST_KEYS = {
     "provider": "переопределяет цель — прогон пойдёт не по проверенному провайдеру",
     "providerOutput": "подставляет готовый ответ вместо вызова модели — прогон не измеряет "
                       "цель, а перечитывает конфиг",
+}
+
+# Профиль проверок: типы, у которых в 0.123.0 нет пути исполнения пользовательского кода
+# и чей отказ отличим от отрицательного решения о модели. Сверено живым прогоном на
+# echo: каждая такая проверка возвращает компонент с `assertion.type`, булевым `pass` и
+# причиной, исключений не бросает; отказ судьи llm-rubric приходит как
+# `metadata.graderError`. Копия профиля — в classify.py (вторая линия, по выгрузке);
+# равенство копий проверяет preflight_test.py. Новый тип добавляется в профиль только
+# вместе с проверкой того, как он сообщает о сбое своего выполнения.
+SUPPORTED_ASSERT_TYPES = frozenset({
+    "contains", "icontains", "not-contains", "not-icontains", "equals", "starts-with",
+    "contains-any", "contains-all", "icontains-any", "icontains-all", "is-json",
+    "llm-rubric",
+})
+
+EXECUTABLE_REASON = ("исполняемая проверка {kind} не поддержана: её сбой приходит как "
+                     "pass: false без graderError и от отрицательного решения о модели "
+                     "не отличим")
+
+# Типы вне профиля, у которых причина отказа своя: называть её поимённо полезнее, чем
+# «тип не поддержан» — по ней видно, какой именно вердикт был бы подделан.
+REJECTED_ASSERT_REASONS = {
+    "assert-set": "группа assert-set не поддержана: пустая группа даёт pass без единой "
+                  "проверки ответа (в 0.123.0 componentResults пуст, assertionCount 0)",
+    "javascript": EXECUTABLE_REASON.format(kind="javascript"),
+    "python": EXECUTABLE_REASON.format(kind="python"),
+    # Некорректный шаблон в 0.123.0 приходит не исключением, а компонентом pass: false
+    # «Invalid regex pattern: …» без graderError: ошибка конфига стала бы провалом модели.
+    "regex": "regex не поддержан: некорректный шаблон приходит как pass: false без "
+             "graderError, и ошибка конфига читалась бы как провал модели",
+    "not-regex": "not-regex не поддержан: некорректный шаблон приходит как pass: false без "
+                 "graderError, и ошибка конфига читалась бы как провал модели",
 }
 
 # Плоский (без кавычек) скаляр читается по-разному YAML 1.1 (PyYAML, здесь) и YAML 1.2
@@ -164,13 +207,32 @@ def merged_vars(default, test, where):
     return {**plain_vars(default, "defaultTest"), **plain_vars(test, where)}
 
 
+def assertion_problem(item):
+    """Почему проверка вне профиля, или None."""
+    if not isinstance(item, dict):
+        return f"проверка не отображение ({type(item).__name__})"
+    kind = item.get("type")
+    if not isinstance(kind, str):
+        return f"у проверки нет строкового type ({kind!r})"
+    if kind in REJECTED_ASSERT_REASONS:
+        return REJECTED_ASSERT_REASONS[kind]
+    if kind not in SUPPORTED_ASSERT_TYPES:
+        return (f"тип {kind} вне профиля: как он сообщает о сбое своего выполнения, не "
+                "проверено — такой сбой пришёл бы решением о модели")
+    return None
+
+
 def asserts_of(section, where):
-    """Проверки секции: их порядок в манифесте — тот же, что в testCase выгрузки."""
+    """Проверки секции из профиля: их порядок в манифесте — тот же, что в testCase выгрузки."""
     if "assert" not in section:
         return []
     value = section["assert"]
     if not isinstance(value, list):
         raise Unsupported(f"{where}.assert не список ({type(value).__name__})")
+    for index, item in enumerate(value):
+        why = assertion_problem(item)
+        if why:
+            raise Unsupported(f"{where}.assert[{index}]: {why}")
     return value
 
 
@@ -199,8 +261,12 @@ def expected_tests(cfg):
             raise Unsupported(f"{where} не отображение ({type(test).__name__}) — "
                               "внешние и сгенерированные пробы не поддержаны")
         reject_unsupported_test_keys(test, where)
+        checks = [*common, *asserts_of(test, where)]
+        if not checks:
+            raise Unsupported(f"{where}: ни одной проверки после слияния с defaultTest — "
+                              "promptfoo вернул бы «No assertions», звать модель незачем")
         expected.append({"vars": merged_vars(default.get("vars"), test.get("vars"), where),
-                         "assert": [*common, *asserts_of(test, where)]})
+                         "assert": checks})
     return expected
 
 

@@ -1,0 +1,20 @@
+# Положительный контроль порога: агрегирование ИСПРАВНЫХ проверок остаётся поддержанным.
+# Две `contains` на ответе `unsafe answer`: первая проходит, вторая нет, `threshold: 0.5`
+# даёт общий pass с причиной «Aggregate score 0.50 ≥ 0.5 threshold». run.sh → код 0 и
+# `REDTEAM_VERDICT=pass`: отдельный `pass: false` у компонента не делает прогон INFRA.
+# Пара к javascript-threshold.yaml — там тот же порог, но одна из проверок не отработала.
+# Используется из selftest.sh; провайдер echo — чтобы случай не зависел от сети.
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: unsafe answer
+    threshold: 0.5
+    assert:
+      - type: contains
+        value: unsafe
+      - type: contains
+        value: refuse

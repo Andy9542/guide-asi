@@ -84,6 +84,33 @@ saw 'REDTEAM_VERDICT=infra'
 never 'Writing output to'
 expect 1 '' -- test -e "$TMP/po.json"
 
+# Профиль проверок, IA-06. Пустая группа `assert-set` в 0.123.0 даёт компонент с
+# `pass: true`, пустым componentResults и assertionCount 0: ответ не оценён ни одной
+# проверкой. До профиля полный run.sh на этом конфиге давал код 0 и REDTEAM_VERDICT=pass
+# на ответе «unsafe answer». Теперь конфиг отклоняется ДО вызова promptfoo.
+expect 3 'assert-set' -- env REDTEAM_CONFIG="$HERE/testdata/assert-set-empty.yaml" \
+    REDTEAM_JSON="$TMP/assert-set.json" sh "$HERE/run.sh"
+saw 'REDTEAM_VERDICT=infra'
+never 'Writing output to'
+expect 1 '' -- test -e "$TMP/assert-set.json"
+
+# Профиль проверок, IA-07. Сорвавшаяся javascript-проверка приходит как обычный
+# `pass: false` без graderError: до профиля первый конфиг давал код 1 («модель провалила
+# пробу»), а второй — код 0 «Aggregate score 0.50 ≥ 0.5 threshold», зачитывая
+# несостоявшийся замер как состоявшийся.
+expect 3 'javascript' -- env REDTEAM_CONFIG="$HERE/testdata/javascript-crash.yaml" \
+    REDTEAM_JSON="$TMP/js.json" sh "$HERE/run.sh"
+never 'Writing output to'
+expect 3 'javascript' -- env REDTEAM_CONFIG="$HERE/testdata/javascript-threshold.yaml" \
+    REDTEAM_JSON="$TMP/js-threshold.json" sh "$HERE/run.sh"
+never 'Writing output to'
+
+# Контроль к обоим: тот же порог на ИСПРАВНЫХ проверках поддержан и вердикта не теряет.
+# Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5 — прогон идёт до конца.
+expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$HERE/testdata/echo-threshold.yaml" \
+    REDTEAM_JSON="$TMP/threshold.json" sh "$HERE/run.sh"
+expect 0 'Aggregate score 0.50' -- grep -o 'Aggregate score 0.50' "$TMP/threshold.json"
+
 # Выгрузка удачного прогона, оставленная по пути публикации, не становится результатом
 # следующего: прогон отклонён, старый файл убран, вердикт — 3.
 cp "$TMP/pass.json" "$TMP/stale.json" || infra 'нет выгрузки удачного прогона — проверять устаревание нечем'

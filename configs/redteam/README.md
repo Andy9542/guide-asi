@@ -22,8 +22,8 @@ selftest не выполняет.
 
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
-python3 classify_test.py        # классификатор на 44 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 35 конфигов: что допускается к прогону и что отклоняется
+python3 classify_test.py        # классификатор на 50 выгрузках в форме promptfoo 0.123.0, без сети
+python3 preflight_test.py       # 51 случай: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -95,6 +95,43 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 в `classify.py`: строка выгрузки, у которой `providerOutput` есть в `testCase`, вердикта
 не получает.
 
+**Профиль проверок.** Принимаются только типы с проверенным контрактом ошибок:
+`contains`, `icontains`, `not-contains`, `not-icontains`, `equals`, `starts-with`,
+`contains-any`, `contains-all`, `icontains-any`, `icontains-all`, `is-json` и судья
+`llm-rubric`. Остальные отклоняются до вызова модели.
+
+`assert-set` — потому что пустая группа даёт PASS без единой проверки ответа: в 0.123.0
+у такой группы `pass: true`, `componentResults` пуст, `metadata.assertionSet.assertionCount`
+равен нулю. Замерено полным `run.sh` на `testdata/assert-set-empty.yaml`: до профиля —
+код 0 и `REDTEAM_VERDICT=pass` на ответе `unsafe answer`, то есть «все проверки прошли»
+там, где не выполнено ни одной; теперь — код 3 без запуска promptfoo.
+
+`javascript`, `python` и незнакомые типы — потому что сбой такой проверки неотличим от
+её отрицательного решения. Исключение внутри функции promptfoo перехватывает и
+возвращает `pass: false`, `score: 0` и причину «Custom function threw error: …» БЕЗ
+`metadata.graderError`. Замерено на `testdata/javascript-crash.yaml`: до профиля — код 1,
+то есть обвинение модели в сбое проверяющего кода; на `testdata/javascript-threshold.yaml`
+с `threshold: 0.5` — код 0 и «Aggregate score 0.50 ≥ 0.5 threshold», то есть
+несостоявшийся замер зачтён в агрегат наравне с состоявшимся.
+
+`threshold` и агрегирование поддержаны: контроль `testdata/echo-threshold.yaml` — две
+ИСПРАВНЫЕ `contains`, одна true и одна false, агрегат 0.50 ≥ 0.5 — даёт код 0.
+Отклонять эту форму значило бы объявлять INFRA валидный замер.
+
+Проба, у которой после слияния с `defaultTest` не осталось ни одной проверки,
+отклоняется там же: promptfoo вернул бы «No assertions» — INFRA уже после вызова модели,
+а звать её незачем.
+
+Вторая линия — в `classify.py`: компонент обязан нести `assertion.type` из того же
+профиля (константа `SUPPORTED_ASSERT_TYPES` есть в обоих файлах, равенство копий
+проверяет `preflight_test.py`). Компонент без `assertion` — так приходит группа
+`assert-set` — или с типом вне профиля вердикта не даёт.
+
+`regex` и `not-regex` — потому что некорректный шаблон в 0.123.0 приходит не
+исключением, а компонентом `pass: false` с причиной «Invalid regex pattern: …» без
+`metadata.graderError`: ошибка конфига читалась бы как провал модели, тот же класс, что
+у `javascript`. Замерено живым прогоном с шаблоном `(`.
+
 Отдельно отклоняются плоские скаляры, которые PyYAML (YAML 1.1) и js-yaml внутри
 promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` или `"yes"`, `code: 010` →
 8 или 10, `day: 2026-09-22` → дата или строка. Манифест описывал бы не то, что уйдёт в
@@ -102,15 +139,20 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 
 ## Что замерено `[стенд]`
 
-**В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (20–40 секунд на
-прогретом кэше npx), 19 сошедшихся строк: `classify_test.py` → «расхождений 0» на 44
-выгрузках; `preflight_test.py` → «расхождений 0» на 35 конфигах; `sh -n` на `run.sh` и
+**В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
+прогретом кэше npx), 29 сошедшихся строк: `classify_test.py` → «расхождений 0» на 50
+выгрузках; `preflight_test.py` → «расхождений 0» на 51 случае; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
 провайдер) → код 3, в выводе нет «Writing output to» и выгрузка не создана;
 `testdata/provider-output.yaml` (готовый ответ в пробе) → код 3 со строкой про
-`providerOutput`, promptfoo так же не запускается и выгрузки нет; выгрузка
+`providerOutput`, promptfoo так же не запускается и выгрузки нет; контрпримеры аудита
+23.09.2026 `testdata/assert-set-empty.yaml`, `testdata/javascript-crash.yaml` и
+`testdata/javascript-threshold.yaml` → код 3 со строкой про `assert-set` или
+`javascript`, без «Writing output to» и без выгрузки; контроль
+`testdata/echo-threshold.yaml` (порог 0.5 на двух исправных `contains`) → код 0,
+`REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке; выгрузка
 удачного прогона, подложенная по пути `REDTEAM_JSON`, после отклонённого прогона не
 остаётся; `REDTEAM_JSON=/dev/full` → код 3 и «не удалось записать»; `results.json` после
 прогона в каталоге не остаётся.
@@ -139,12 +181,13 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
    модель поддалась, уезжал в «не смогли измерить». Ошибка в самую опасную сторону:
    сработавшая атака выглядела как сбой стенда. Правило теперь одно: **INFRA — это
    отсутствие явного вердикта у теста, а не наличие текста ошибки рядом с ним.**
-   Вердикта нет в четырёх случаях: провайдер не ответил (`failureReason=2`), судья не
+   Вердикта нет в пяти случаях: провайдер не ответил (`failureReason=2`), судья не
    вынес решения (`graderError` в `componentResults`), у пробы не было ни одной проверки
-   (`gradingResult.reason = "No assertions"`) и компонент проверки пришёл без булева
-   `pass` — форма выгрузки незнакома, вердикта из неё нет. Решение компонента с общим не
-   сверяется: у promptfoo есть пороги и агрегирование, при которых общий PASS уживается
-   с отдельным `pass: false`.
+   (`gradingResult.reason = "No assertions"`), компонент проверки пришёл без булева
+   `pass` и компонент не назвал проверку, которая вынесла решение (`assertion.type`
+   отсутствует или вне профиля) — форма выгрузки незнакома, вердикта из неё нет. Решение
+   компонента с общим не сверяется: у promptfoo есть пороги и агрегирование, при которых
+   общий PASS уживается с отдельным `pass: false`.
 
 ## Чего не закрывает
 
@@ -155,6 +198,12 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 
 Манифест сверяет состав набора и идентичность проб, но не свежесть ответа модели за
 пределами флага `--no-cache` и проверки `response.cached`.
+
+Профиль проверок узкий по той же причине: обвязка судит только о типах, у которых
+проверено, как они сообщают о сбое СВОЕГО выполнения. `assert-set`, `javascript` и
+`python` в гайде не используются; понадобятся — сначала проверьте контракт их ошибок на
+своей версии promptfoo, потом добавляйте тип в `SUPPORTED_ASSERT_TYPES` (константа в
+`preflight.py`, копия в `classify.py`).
 
 Набор проб измеряет **модель**, а не систему. Агент может безупречно отказываться от всех
 трёх проб и при этом переводить деньги не туда, потому что у него слишком широкие права, —

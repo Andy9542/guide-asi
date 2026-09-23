@@ -39,6 +39,7 @@ VERSION = "0.123.0"
 
 sys.dont_write_bytecode = True  # иначе рядом с модулем остаётся __pycache__
 sys.path.insert(0, HERE)
+import classify  # noqa: E402  — профиль проверок сверяется с копией в классификаторе
 import preflight  # noqa: E402  — путь добавляется выше
 
 # Конфиг поддержанного режима: один провайдер, один промпт-строка, явный список проб.
@@ -71,6 +72,24 @@ tests:
     description: second
 """
 
+# Строка проверки MINIMAL: случаи профиля подменяют её целиком.
+ASSERT = "    assert: [{type: contains, value: refuse}]\n"
+
+# Типы профиля, которых в гайде нет, но которые поддержаны: сравнение без учёта
+# регистра, отрицание и судья. Формы сверены живым прогоном 0.123.0 — каждый компонент
+# приходит с `assertion.type`, исключений ни один тип не бросает.
+PROFILE = """providers:
+  - echo
+prompts:
+  - "{{query}}"
+tests:
+  - vars: {query: "I refuse A"}
+    assert:
+      - {type: icontains, value: REFUSE}
+      - {type: not-contains, value: "unsafe"}
+      - {type: llm-rubric, value: "The response refuses"}
+"""
+
 # Снято с results.results[*].testCase выгрузки promptfoo 0.123.0 по конфигу DEFAULTS.
 DEFAULTS_EXPECTED = [
     {"vars": {"query": "I refuse A", "tone": "polite"},
@@ -86,6 +105,12 @@ def swap(old, new):
     if old not in MINIMAL:
         raise SystemExit(f"preflight_test: в MINIMAL нет «{old}» — случай проверяет не то")
     return MINIMAL.replace(old, new)
+
+
+def testdata(name):
+    """Текст конфига из testdata/: случай проверяет тот же файл, что идёт в selftest."""
+    with open(os.path.join(TESTDATA, name), encoding="utf-8") as fh:
+        return fh.read()
 
 
 def rejected():
@@ -145,6 +170,33 @@ def rejected():
         ("конфиг не в UTF-8", MINIMAL.encode("utf-8") + "# комментарий\n".encode("cp1251"),
          "не в UTF-8"),
         ("файла нет", None, "конфиг не прочитан"),
+        # Профиль проверок. Контрпримеры аудита 23.09.2026 целиком, как они
+        # воспроизводились полным run.sh на 0.123.0: пустая группа давала код 0 и pass
+        # на ответе «unsafe answer», падающая javascript — код 1 (обвинение модели в
+        # сбое проверки), она же с порогом — снова код 0 «Aggregate score 0.50 ≥ 0.5».
+        ("testdata/assert-set-empty.yaml", testdata("assert-set-empty.yaml"), "assert-set"),
+        ("testdata/javascript-crash.yaml", testdata("javascript-crash.yaml"), "javascript"),
+        ("testdata/javascript-threshold.yaml", testdata("javascript-threshold.yaml"), "javascript"),
+        ("непустой assert-set", swap(ASSERT, "    assert: [{type: assert-set, assert: "
+                                             "[{type: contains, value: refuse}]}]\n"), "assert-set"),
+        ("пустой assert-set в defaultTest",
+         MINIMAL + "defaultTest:\n  assert: [{type: assert-set, assert: []}]\n", "assert-set"),
+        ("python-проверка", swap(ASSERT, '    assert: [{type: python, value: "return True"}]\n'),
+         "python"),
+        # Некорректный шаблон в 0.123.0 приходит как pass: false без graderError —
+        # ошибка конфига читалась бы как провал модели, тот же класс, что у javascript.
+        ("regex-проверка", swap(ASSERT, '    assert: [{type: regex, value: "^I refuse"}]\n'),
+         "regex"),
+        ("незнакомый тип проверки", swap(ASSERT, "    assert: [{type: telepathy, value: refuse}]\n"),
+         "вне профиля"),
+        ("проверка не отображение", swap(ASSERT, "    assert: [contains]\n"), "не отображение"),
+        ("проверка без type", swap(ASSERT, "    assert: [{value: refuse}]\n"), "type"),
+        ("type числом", swap(ASSERT, "    assert: [{type: 1, value: refuse}]\n"), "type"),
+        # Проба без единой проверки: promptfoo вернул бы «No assertions» — это INFRA уже
+        # после вызова модели, а звать её незачем.
+        ("проба без проверок", swap(ASSERT, ""), "ни одной проверки"),
+        ("defaultTest.assert пуст, у пробы проверок нет",
+         swap(ASSERT, "") + "defaultTest:\n  assert: []\n", "ни одной проверки"),
     ]
 
 
@@ -309,6 +361,22 @@ def check_rejected(name, text, want_err, *, work):
     return report(name, found)
 
 
+def check_profile_copies(name):
+    """Профиль проверок один: копия в classify обязана совпадать с preflight.
+
+    classify не зависит от PyYAML и держит свою константу; разойдутся — вторая линия
+    начнёт отвергать типы, которые preflight пропускает, или пропускать отклонённые.
+    """
+    found = []
+    for module in (preflight, classify):
+        if not isinstance(getattr(module, "SUPPORTED_ASSERT_TYPES", None), frozenset):
+            found.append(f"в {module.__name__} нет frozenset SUPPORTED_ASSERT_TYPES")
+    if not found and preflight.SUPPORTED_ASSERT_TYPES != classify.SUPPORTED_ASSERT_TYPES:
+        found.append("профили разошлись: "
+                     f"{sorted(preflight.SUPPORTED_ASSERT_TYPES ^ classify.SUPPORTED_ASSERT_TYPES)}")
+    return report(name, found)
+
+
 def report(name, found):
     print(f"[{'ok' if not found else 'ПРОВАЛ'}] {name}" + (f": {'; '.join(found)}" if found else ""))
     return not found
@@ -328,6 +396,9 @@ def main():
         defaults = os.path.join(work, "defaults.yaml")
         with open(defaults, "w", encoding="utf-8") as fh:
             fh.write(DEFAULTS)
+        profile = os.path.join(work, "profile.yaml")
+        with open(profile, "w", encoding="utf-8") as fh:
+            fh.write(PROFILE)
         accepted = [
             ("echo-pass.yaml", os.path.join(TESTDATA, "echo-pass.yaml"), 2,
              {"id": "echo", "label": ""}, None),
@@ -337,6 +408,11 @@ def main():
              {"id": "openai:chat:chat", "label": ""}, None),
             ("слияние defaultTest = testCase выгрузки", defaults, 2,
              {"id": "echo", "label": ""}, DEFAULTS_EXPECTED),
+            # Порог и агрегирование исправных проверок — поддержанная форма: отклонять
+            # их значило бы объявлять INFRA валидный замер (контроль аудита).
+            ("echo-threshold.yaml", os.path.join(TESTDATA, "echo-threshold.yaml"), 1,
+             {"id": "echo", "label": ""}, None),
+            ("остальные типы профиля", profile, 1, {"id": "echo", "label": ""}, None),
         ]
         for case in accepted:
             number += 1
@@ -347,6 +423,8 @@ def main():
         number += 1
         diffs += not check_write_failure("копию некуда записать",
                                          work=case_dir(work, number))
+        number += 1
+        diffs += not check_profile_copies("профиль preflight = профиль classify")
         for case in rejected():
             number += 1
             diffs += not check_rejected(*case, work=case_dir(work, number))

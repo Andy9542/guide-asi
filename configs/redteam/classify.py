@@ -32,12 +32,27 @@ preflight.py по конфигу ДО вызова модели) задаёт и
 измерить». Ошибка в опасную сторону: сработавшая атака выглядела как сбой стенда.
 Поэтому смотрим не на наличие текста ошибки, а на наличие явного булева вердикта у
 каждого теста и у каждого компонента его проверки.
+
+Булева решения мало: компонент обязан назвать проверку, которая его вынесла
+(`assertion.type` из профиля поддержанных типов). Сорвавшаяся javascript-проверка
+приходит в 0.123.0 обычным `pass: false` с причиной «Custom function threw error: …» и
+БЕЗ `metadata.graderError`, а группа `assert-set` — с `pass: true`, пустым
+`componentResults` и вовсе без `assertion`. Первая линия — preflight.py: такие конфиги
+не доходят до прогона. Эта, вторая, работает по выгрузке.
 """
 import json
 import os
 import sys
 
 CODES = {"pass": 0, "fail": 1, "infra": 3}
+
+# Копия профиля проверок из preflight.py. Своя, а не импорт: classify обязан работать
+# без PyYAML, от которого зависит preflight. Равенство копий проверяет preflight_test.py.
+SUPPORTED_ASSERT_TYPES = frozenset({
+    "contains", "icontains", "not-contains", "not-icontains", "equals", "starts-with",
+    "contains-any", "contains-all", "icontains-any", "icontains-all", "is-json",
+    "llm-rubric",
+})
 
 
 def finish(verdict, message):
@@ -192,12 +207,29 @@ def check_expected(blob, manifest):
         infra(f"покрыты не все пробы: нет индексов {sorted(set(range(count)) - seen)}")
 
 
+def assertion_problem(check):
+    """Почему по компоненту не видно, какая проверка вынесла решение, или None.
+
+    Тип нужен потому, что решение само по себе не говорит, состоялся ли замер: у
+    сорвавшейся javascript-проверки `pass: false` тот же, что у честного провала, а
+    группа `assert-set` приходит с `pass: true` и без единой выполненной проверки.
+    """
+    assertion = check.get("assertion")
+    if not isinstance(assertion, dict) or not isinstance(assertion.get("type"), str):
+        return "компонент без assertion.type — какая проверка его вынесла, неизвестно"
+    if assertion["type"] not in SUPPORTED_ASSERT_TYPES:
+        return (f"компонент проверки типа {assertion['type']} вне профиля — "
+                "статус её выполнения неизвестен")
+    return None
+
+
 def component_problem(check):
     """Почему компонент проверки не несёт решения, или None.
 
     Решение компонента с общим не сверяется: пороги и агрегирование promptfoo дают общий
     PASS при отдельном `pass: false`, и правило «все компоненты true» объявляло бы INFRA
-    поддержанную форму. Проверяется только то, что решение в компоненте вообще есть.
+    поддержанную форму. Проверяется то, что решение в компоненте есть и что известна
+    проверка, которая его вынесла.
     """
     if not isinstance(check, dict):
         return f"компонент не объект ({type(check).__name__})"
@@ -206,7 +238,7 @@ def component_problem(check):
         return "у компонента graderError"
     if not isinstance(check.get("pass"), bool):
         return f"компонент проверки без булева pass ({check.get('pass')!r})"
-    return None
+    return assertion_problem(check)
 
 
 def verdict_of(result):
