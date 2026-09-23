@@ -61,10 +61,11 @@ never 'ИСКЛЮЧЕНИЕ'
 expect 0 '' -- sh -c '"$1" "$2" "$3" | grep -c "^\[ok\]" | grep -x 14' sh \
   "$PY" "$HERE/verify_demo.py" "$TMP/keys"
 
-# Регрессии R5/R6: guard обязателен, ReplayGuard атомарен между потоками. unittest пишет
-# «OK» и «Ran N tests» в stderr; expect собирает 2>&1. Восемь тестов, а не «сколько-то».
+# Регрессии R5/R6 и IA-01: guard обязателен, ReplayGuard атомарен между потоками, часы он
+# берёт внутри критической секции. unittest пишет «OK» и «Ran N tests» в stderr; expect
+# собирает 2>&1. Девять тестов, а не «сколько-то».
 expect 0 'OK' -- "$PY" "$HERE/signing_test.py"
-saw 'Ran 8 tests'
+saw 'Ran 9 tests'
 never 'FAILED'
 
 # Ключи README велит класть вне дерева репозитория; selftest тем более.

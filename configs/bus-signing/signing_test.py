@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Регрессии на защиту от повтора: R5 (guard обязателен) и R6 (атомарность ReplayGuard).
 
-    python3 signing_test.py         # 0 — все восемь тестов сошлись; ключи не нужны
+    python3 signing_test.py         # 0 — все девять тестов сошлись; ключи не нужны
 
 Пара Ed25519 генерируется в памяти. Конкурентные тесты утверждают число принятых
 конвертов и согласованность хранилища, а не наличие Lock в исходнике: проверяется
@@ -14,11 +14,17 @@
 Поэтому окно расширяется медленным множеством: `in` и `len` спят несколько миллисекунд.
 Без блокировки все потоки проходят проверку разом и все регистрируются; с блокировкой —
 по одному.
+
+Чередование на границе истечения окна планировщику не доверено вовсе: часы подменены, а
+обёртка над настоящей блокировкой guard останавливает поток ровно на входе в критическую
+секцию. Поэтому порядок «свежесть проверена до истечения — запись вытолкнута — секция
+занята» воспроизводится каждый прогон, а не изредка.
 """
 import copy
 import threading
 import time
 import unittest
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -51,6 +57,40 @@ def widen(guard, delay=0.005):
     """Подменяет множество увиденных nonce медленным: окно гонки — миллисекунды."""
     guard._seen = SlowSet(delay)
     return guard
+
+
+class GatedLock:
+    """Обёртка над настоящей блокировкой guard: один вход выбранного потока ждёт.
+
+    Останавливает поток `ident` ровно на входе в критическую секцию и ровно один раз:
+    len(guard) и приём соседнего конверта берут ту же блокировку из главного потока и
+    должны проходить насквозь, иначе тест встал бы на собственной двери.
+    """
+
+    def __init__(self, lock):
+        self._lock = lock
+        #: Поток, который надо остановить; проставляет он сам, перед вызовом verify().
+        self.ident = None
+        self.at_door = threading.Event()
+        self.resume = threading.Event()
+        self._gated = False
+
+    def __enter__(self):
+        if threading.get_ident() == self.ident and not self._gated:
+            self._gated = True
+            self.at_door.set()
+            if not self.resume.wait(JOIN_TIMEOUT):
+                raise AssertionError("поток не отпущен от двери за таймаут")
+        return self._lock.__enter__()
+
+    def __exit__(self, *exc_info):
+        return self._lock.__exit__(*exc_info)
+
+    def acquire(self, *args, **kwargs):
+        return self._lock.acquire(*args, **kwargs)
+
+    def release(self):
+        self._lock.release()
 
 
 def run_threads(n, target):
@@ -150,6 +190,53 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(results.count(True), limit)
         self.assertEqual(len(guard), limit)
         self.assertEqual(len(guard._expiry), len(guard._seen))
+
+    def test_expiry_boundary_race(self):
+        """Повтор на границе истечения окна при чередовании потоков (аудит 23.09.2026).
+
+        Поток A проверяет свежесть E в 1299.9 и встаёт перед блокировкой; в 1300.1
+        соседний конверт выталкивает истёкший nonce E. Пока момент времени брался до
+        входа в секцию, A шёл дальше со старым `now`, nonce не находил и принимал
+        повтор: одним проходом он миновал и «уже видел», и «слишком стар».
+        """
+        clock = {"now": 1000.0}
+        env = self.envelope(ts=1000.0)
+        replayed = []
+
+        def present(envelope, guard):
+            return signing.verify(copy.deepcopy(envelope), self.public,
+                                  recipient=ME, guard=guard)
+
+        with mock.patch.object(signing.time, "time", lambda: clock["now"]):
+            guard = signing.ReplayGuard()
+            self.assertTrue(present(env, guard))
+            # Контроль: до истечения окна повтор отсекается по nonce.
+            clock["now"] = 1200.0
+            self.assertFalse(present(env, guard))
+            # Контроль: после истечения окна E не свеж и без всякого чередования.
+            clock["now"] = 1301.0
+            self.assertFalse(present(env, signing.ReplayGuard()))
+
+            clock["now"] = 1299.9
+            gate = GatedLock(guard._lock)
+            guard._lock = gate
+
+            def replay():
+                gate.ident = threading.get_ident()
+                replayed.append(present(env, guard))
+
+            thread = threading.Thread(target=replay)
+            thread.start()
+            self.assertTrue(gate.at_door.wait(JOIN_TIMEOUT), "A не дошёл до блокировки")
+            clock["now"] = 1300.1
+            self.assertTrue(present(self.envelope(ts=1300.1), guard))
+            # Соседний конверт вытолкнул истёкшую запись E: в guard остался один nonce.
+            self.assertEqual(len(guard), 1)
+            gate.resume.set()
+            thread.join(timeout=JOIN_TIMEOUT)
+            self.assertFalse(thread.is_alive(), "A завис на блокировке")
+        self.assertEqual(replayed, [False])
+        self.assertEqual(len(guard), 1)
 
     def test_forged_with_legit_nonce_does_not_block_legit(self):
         # Криптопроверка идёт до регистрации: подделка не занимает место в guard.
