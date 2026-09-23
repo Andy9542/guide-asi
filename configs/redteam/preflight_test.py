@@ -10,14 +10,20 @@
 Эталон слияния `defaultTest` взят не из головы: vars и assert в манифесте сверяются с
 `testCase` реальной выгрузки promptfoo 0.123.0 по тому же конфигу (defaults первыми).
 
-preflight запускается подпроцессом, а не импортом: импорт оставил бы в каталоге
-`__pycache__`, а самопроверка репозитория требует чистого `git status`.
+Случаи прогоняются подпроцессом: так проверяется и контракт процесса — код возврата,
+пустой stdout, одна строка в stderr. Исключение — случай с правкой исходника между
+этапами: вклиниться в середину чужого процесса нечем, поэтому там зовётся main()
+импортом, а `sys.dont_write_bytecode` не даёт импорту оставить рядом `__pycache__`.
 """
+import hashlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stderr, redirect_stdout
+from types import SimpleNamespace
 
 try:
     import yaml  # noqa: F401  — нужен самому preflight, проверяем наличие до прогона
@@ -30,6 +36,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PREFLIGHT = os.path.join(HERE, "preflight.py")
 TESTDATA = os.path.join(HERE, "testdata")
 VERSION = "0.123.0"
+
+sys.dont_write_bytecode = True  # иначе рядом с модулем остаётся __pycache__
+sys.path.insert(0, HERE)
+import preflight  # noqa: E402  — путь добавляется выше
 
 # Конфиг поддержанного режима: один провайдер, один промпт-строка, явный список проб.
 # Случаи отклонения — это он же с одним изменением.
@@ -123,6 +133,10 @@ def rejected():
         ("вложенность в 3000 уровней", swap('{query: "I refuse A"}',
                                             "{query: " + "[" * 3000 + "]" * 3000 + "}"),
          "вложенность"),
+        # Не-UTF-8 — отказ по контракту: раньше чтение падало UnicodeDecodeError, то есть
+        # traceback и код 1, который run.sh прочитал бы как сбой инструмента.
+        ("конфиг не в UTF-8", MINIMAL.encode("utf-8") + "# комментарий\n".encode("cp1251"),
+         "не в UTF-8"),
         ("файла нет", None, "конфиг не прочитан"),
     ]
 
@@ -151,8 +165,12 @@ def contract_problems(proc, expected_code):
     return found
 
 
-def manifest_problems(path, tests, provider, reference):
-    """Манифест: версия, пин, провайдер, промпт, число проб, слияние defaults, отсутствие ключей."""
+def manifest_problems(path, tests, provider, reference, copy):
+    """Манифест: версия, пин, провайдер, промпт, число проб, слияние defaults, отсутствие ключей.
+
+    `config_sha256` сверяется с копией: манифест и копия обязаны описывать один снимок
+    конфига, иначе прогон пойдёт не по тому, что проверено.
+    """
     found = []
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
@@ -171,6 +189,9 @@ def manifest_problems(path, tests, provider, reference):
         found.append("в манифесте ключ доступа из конфига")
     if reference is not None and manifest.get("tests") != reference:
         found.append(f"пробы {manifest.get('tests')!r} не совпали с эталоном экспорта")
+    digest = hashlib.sha256(copy).hexdigest()
+    if manifest.get("config_sha256") != digest:
+        found.append(f"config_sha256={manifest.get('config_sha256')!r}, у копии {digest}")
     return found
 
 
@@ -184,7 +205,83 @@ def check_accepted(name, config, tests, provider, reference, *, work):
             copy = fh.read()
         if original != copy:
             found.append("копия конфига отличается от оригинала")
-        found += manifest_problems(manifest_path, tests, provider, reference)
+        found += manifest_problems(manifest_path, tests, provider, reference, copy)
+    return report(name, found)
+
+
+def run_in_process(config, work):
+    """preflight.main() в этом процессе: (результат, путь копии, путь манифеста).
+
+    Форма результата — как у subprocess.run, чтобы контракт проверял тот же код.
+    """
+    copy_path = os.path.join(work, "config.yaml")
+    manifest_path = os.path.join(work, "expected.json")
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = preflight.main([config, copy_path, manifest_path,
+                               "--promptfoo-version", VERSION])
+    return (SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue()),
+            copy_path, manifest_path)
+
+
+def check_write_failure(name, *, work):
+    """Ошибка записи копии или манифеста — отказ кодом 3, а не traceback."""
+    source = os.path.join(work, "source.yaml")
+    with open(source, "w", encoding="utf-8") as fh:
+        fh.write(MINIMAL)
+    copy_path = os.path.join(work, "нет-такого-каталога", "config.yaml")
+    manifest_path = os.path.join(work, "expected.json")
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = preflight.main([source, copy_path, manifest_path,
+                               "--promptfoo-version", VERSION])
+    proc = SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
+    found = contract_problems(proc, 3)
+    if "не записан" not in proc.stderr:
+        found.append(f"stderr без «не записан»: {proc.stderr.strip()!r}")
+    if os.path.exists(manifest_path):
+        found.append("манифест записан при отказе")
+    return report(name, found)
+
+
+def check_snapshot(name, *, work):
+    """Правка исходника после разбора не попадает ни в копию, ни в манифест.
+
+    Исходник читался дважды — до разбора и при копировании, — и сохранение файла между
+    чтениями отправляло в прогон конфиг, которого preflight не видел. Здесь правка
+    вносится ровно в это окно: обёрткой над разбором дописывается `evaluateOptions.repeat`,
+    то есть режим, который preflight обязан отклонять.
+    """
+    source = os.path.join(work, "source.yaml")
+    with open(source, "wb") as fh:
+        fh.write(MINIMAL.encode("utf-8"))
+    edit = b"evaluateOptions:\n  repeat: 2\n"
+    parse = preflight.parse_yaml
+
+    def parse_then_edit(text):
+        result = parse(text)
+        with open(source, "ab") as fh:
+            fh.write(edit)
+        return result
+
+    preflight.parse_yaml = parse_then_edit
+    try:
+        proc, copy_path, manifest_path = run_in_process(source, work)
+    finally:
+        preflight.parse_yaml = parse
+    found = contract_problems(proc, 0)
+    with open(source, "rb") as fh:
+        if not fh.read().endswith(edit):
+            found.append("исходник не изменён между этапами — случай проверяет не то")
+    if not found:
+        with open(copy_path, "rb") as fh:
+            copy = fh.read()
+        if copy != MINIMAL.encode("utf-8"):
+            found.append(f"копия не равна снимку до правки: {copy!r}")
+        found += manifest_problems(manifest_path, 1, {"id": "echo", "label": ""}, None, copy)
+        again = os.path.join(work, "again")
+        os.mkdir(again)
+        found += contract_problems(run_in_process(copy_path, again)[0], 0)
     return report(name, found)
 
 
@@ -192,8 +289,8 @@ def check_rejected(name, text, want_err, *, work):
     config = os.path.join(work, "нет-такого.yaml")
     if text is not None:
         config = os.path.join(work, "case.yaml")
-        with open(config, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        with open(config, "wb") as fh:
+            fh.write(text if isinstance(text, bytes) else text.encode("utf-8"))
     proc, _, manifest_path = run_preflight(config, work)
     found = contract_problems(proc, 3)
     if want_err not in proc.stderr:
@@ -235,6 +332,12 @@ def main():
         for case in accepted:
             number += 1
             diffs += not check_accepted(*case, work=case_dir(work, number))
+        number += 1
+        diffs += not check_snapshot("правка исходника после разбора",
+                                    work=case_dir(work, number))
+        number += 1
+        diffs += not check_write_failure("копию некуда записать",
+                                         work=case_dir(work, number))
         for case in rejected():
             number += 1
             diffs += not check_rejected(*case, work=case_dir(work, number))

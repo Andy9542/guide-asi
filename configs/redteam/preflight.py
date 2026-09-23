@@ -17,6 +17,11 @@
 с ним. Прогон идёт по копии: конфиг, изменённый во время прогона, оставил бы манифест
 и выгрузку от разных наборов.
 
+Исходник читается ровно один раз: разбор, манифест и копия для прогона делаются из
+одного снимка байтов, а его SHA-256 лежит в манифесте (`config_sha256`) — так копия
+сверяется с тем, что проверено. При двух чтениях сохранение файла между ними отправляло
+в прогон конфиг, которого preflight не видел.
+
 Режим сознательно узкий: один целевой провайдер, один промпт-строка, явный список
 tests, без повторов и списков в vars. Всё перечисленное promptfoo разворачивает в
 матрицу «промпт × провайдер × комбинация переменных», и ожидаемый набор перестаёт быть
@@ -26,9 +31,9 @@ tests, без повторов и списков в vars. Всё перечис�
 Ключей доступа манифест не содержит: в него попадают только vars, assert, идентичность
 провайдера и текст промпта.
 """
+import hashlib
 import json
 import re
-import shutil
 import sys
 
 try:
@@ -60,14 +65,18 @@ class Unsupported(Exception):
     """Конфиг вне поддержанного режима: прогон не начинается."""
 
 
-def load_yaml(path):
-    """Дерево значений и дерево узлов одного файла.
+def read_snapshot(path):
+    """Байты конфига одним чтением: всё дальнейшее работает только с ними."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def parse_yaml(text):
+    """Дерево значений и дерево узлов одного текста.
 
     Второе нужно ради сырого текста скаляров: по значению уже не видно, было оно
     написано как `yes` или как `"yes"`.
     """
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
     try:
         return yaml.safe_load(text), yaml.compose(text)
     except yaml.YAMLError as exc:
@@ -236,19 +245,29 @@ def main(argv):
                       "--promptfoo-version <версия>")
     config_path, copy_path, manifest_path, version = argv[0], argv[1], argv[2], argv[4]
     try:
-        cfg, node = load_yaml(config_path)
+        data = read_snapshot(config_path)
+        cfg, node = parse_yaml(data.decode("utf-8"))
         manifest = build_manifest(cfg, node, version)
     except Unsupported as exc:
         return reject(str(exc))
     except OSError as exc:
         return reject(f"конфиг не прочитан: {exc}")
+    except UnicodeDecodeError as exc:
+        return reject(f"конфиг не в UTF-8 ({exc.reason}) — сохраните файл в UTF-8")
     except RecursionError:
         # Тысячи уровней вложенности роняют сам парсер; это отказ по контракту (код 3),
         # а не traceback: вызывающий разбирает исходы по коду.
         return reject("вложенность конфига слишком глубока — конфиг не разобран")
-    shutil.copyfile(config_path, copy_path)
-    with open(manifest_path, "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, ensure_ascii=False)
+    manifest["config_sha256"] = hashlib.sha256(data).hexdigest()  # чем сверить копию
+    # Копия пишется из снимка, а не копированием файла: второе чтение исходника вернуло бы
+    # то, что сохранили после разбора, и в прогон ушёл бы непроверенный конфиг.
+    try:
+        with open(copy_path, "wb") as fh:
+            fh.write(data)
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, ensure_ascii=False)
+    except OSError as exc:
+        return reject(f"копия или манифест не записаны: {exc}")
     sys.stderr.write(f"redteam: preflight: режим поддержан, проб в наборе: "
                      f"{len(manifest['tests'])}\n")
     return 0
