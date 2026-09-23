@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Регрессии на защиту от повтора: R5 (guard обязателен) и R6 (атомарность ReplayGuard).
 
-    python3 signing_test.py         # 0 — все девять тестов сошлись; ключи не нужны
+    python3 signing_test.py         # 0 — все десять тестов сошлись; ключи не нужны
 
 Пара Ed25519 генерируется в памяти. Конкурентные тесты утверждают число принятых
 конвертов и согласованность хранилища, а не наличие Lock в исходнике: проверяется
@@ -19,6 +19,9 @@
 обёртка над настоящей блокировкой guard останавливает поток ровно на входе в критическую
 секцию. Поэтому порядок «свежесть проверена до истечения — запись вытолкнута — секция
 занята» воспроизводится каждый прогон, а не изредка.
+
+Откат часов проверяется одним потоком на тех же подменённых часах: потоки здесь ни при
+чём — назад идёт само системное время.
 """
 import copy
 import threading
@@ -237,6 +240,39 @@ class ReplayTests(unittest.TestCase):
             self.assertFalse(thread.is_alive(), "A завис на блокировке")
         self.assertEqual(replayed, [False])
         self.assertEqual(len(guard), 1)
+
+    def test_clock_rollback_does_not_revive_nonce(self):
+        """Откат системных часов не возвращает вытолкнутый nonce (аудит 23.09.2026).
+
+        A принят в T; конверт B в T+301 выталкивает истёкшую запись A, и повтор A в
+        T+301 отвергается как старый — контроль. Пока свежесть считалась по сырым
+        системным часам, откат к T+299 снова вводил A в окно, и уже принятый конверт
+        проходил второй раз.
+        """
+        T = 1_700_000_000.0
+        clock = {"now": T}
+        guard = signing.ReplayGuard()
+        env_a = self.envelope(nonce="a", ts=T)
+        env_b = self.envelope(nonce="b", ts=T + 301)
+
+        def present(envelope):
+            return signing.verify(copy.deepcopy(envelope), self.public,
+                                  recipient=ME, guard=guard)
+
+        with mock.patch.object(signing.time, "time", lambda: clock["now"]):
+            got = [present(env_a), present(env_a)]
+            clock["now"] = T + 301
+            got += [present(env_b), present(env_a)]
+            clock["now"] = T + 299
+            got.append(present(env_a))
+            self.assertEqual(got, [True, False, True, False, False])
+            # Вытолкнутая запись A не вернулась: в guard остался один nonce — B.
+            self.assertEqual(len(guard), 1)
+            # Шкала не убывает, но и не запирает приём: свежий по ней конверт проходит.
+            self.assertTrue(present(self.envelope(nonce="c", ts=T + 301)))
+            # Цена шкалы: отставший от неё ts устарел, пока часы не догонят максимум.
+            self.assertFalse(present(self.envelope(nonce="d", ts=T)))
+        self.assertEqual(len(guard), 2)
 
     def test_forged_with_legit_nonce_does_not_block_legit(self):
         # Криптопроверка идёт до регистрации: подделка не занимает место в guard.
