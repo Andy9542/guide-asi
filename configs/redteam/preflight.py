@@ -29,14 +29,14 @@ tests, без повторов и списков в vars. Всё перечис�
 судья в `defaultTest.options.provider` разрешён: он не цель прогона.
 
 Проверки пробы ограничены профилем: детерминированные сравнения без пути исполнения
-(contains, icontains, not-contains, not-icontains, equals, starts-with, regex, not-regex,
-contains-any, contains-all, icontains-any, icontains-all, is-json) и судья llm-rubric.
-Группа `assert-set`, исполняемые типы (javascript, python) и незнакомые отклоняются ДО
-запуска: пустая группа в 0.123.0 даёт компонент с `pass: true` без единой проверки
-ответа, а сбой исполняемой проверки приходит как обычный `pass: false` без
-`metadata.graderError` — от отрицательного решения о модели его не отличить. Проба, у
-которой после слияния с defaultTest не осталось ни одной проверки, отклоняется там же:
-promptfoo вернул бы «No assertions», и звать модель незачем. `threshold` разрешён —
+(contains, icontains, not-contains, not-icontains, equals, starts-with, contains-any,
+contains-all, icontains-any, icontains-all, is-json) и судья llm-rubric. Группа
+`assert-set`, исполняемые типы (javascript, python), regex/not-regex и незнакомые
+отклоняются ДО запуска: пустая группа в 0.123.0 даёт компонент с `pass: true` без единой
+проверки ответа, а сбой исполняемой проверки и некорректный шаблон regex приходят как
+обычный `pass: false` без `metadata.graderError` — от отрицательного решения о модели их
+не отличить. Проба, у которой после слияния с defaultTest не осталось ни одной проверки,
+отклоняется там же: promptfoo вернул бы «No assertions», и звать модель незачем. `threshold` разрешён —
 агрегирование ИСПРАВНЫХ проверок поддержано.
 
 Готовый ответ в пробе (`providerOutput`) не принимается: promptfoo подставляет его
