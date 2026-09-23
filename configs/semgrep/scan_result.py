@@ -153,13 +153,22 @@ def shorten(items: list[str], total: int) -> str:
 
 
 def incompleteness(expected: set[str], report: dict, walk_gaps: list[str]) -> list[str]:
-    """Причины, по которым охват нельзя назвать полным: сначала обход, потом отчёт."""
-    scanned = report['paths']['scanned']
-    for path in scanned:
-        if not isinstance(path, str):
-            raise Incomplete('в paths.scanned не строка, а %s' % type(path).__name__)
+    """Причины, по которым охват нельзя назвать полным: сначала обход, потом отчёт.
+
+    Испорченные `paths.scanned` и `paths.skipped` тоже пробелы, а не исключения:
+    исключение отсюда вылетало бы мимо ветки «находка важнее неполноты», и подтверждённая
+    ERROR-находка при rc=1 пряталась бы за «НЕПОЛНО».
+    """
     gaps = list(walk_gaps)
-    reasons = skip_reasons(report)
+    scanned = [p for p in report['paths']['scanned'] if isinstance(p, str)]
+    odd = len(report['paths']['scanned']) - len(scanned)
+    if odd:
+        gaps.append('в paths.scanned записей не строкой: %d' % odd)
+    try:
+        reasons = skip_reasons(report)
+    except Incomplete as exc:
+        reasons = {}
+        gaps.append(str(exc))
     missing = sorted(expected - set(scanned))
     if missing:
         named = ['%s (%s)' % (p, reasons[p]) if p in reasons else p for p in missing]

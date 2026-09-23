@@ -277,6 +277,18 @@ class ScanResultCase(unittest.TestCase):
         code, line = self.helper(0, {'version': '1.176.1', 'results': [], 'errors': []})
         self.assertEqual(code, 3, line)
 
+    def test_finding_wins_over_malformed_report_paths(self):
+        # Испорченный skipped или scanned — пробел, но подтверждённая находка важнее него.
+        self.touch('a.js')
+        code, line = self.helper(1, report(['/src/a.js'], results=[finding('/src/a.js')],
+                                           skipped=[{'path': '/src/locked'}]))
+        self.assertEqual(code, 1, line)
+        self.assertIn('НАХОДКА', line)
+        self.assertIn('неполно', line)
+        code, line = self.helper(1, report(['/src/a.js', 7], results=[finding('/src/a.js')]))
+        self.assertEqual(code, 1, line)
+        self.assertIn('не строкой', line)
+
     def test_malformed_skipped_is_incomplete(self):
         # По skipped читаются причины отсутствия доступа: испорченный список — не «пусто».
         self.touch('a.js')
