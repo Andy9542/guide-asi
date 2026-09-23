@@ -65,7 +65,7 @@ expect 0 '' -- sh -c '"$1" "$2" "$3" | grep -c "^\[ok\]" | grep -x 14' sh \
 # часы он берёт внутри критической секции и не пускает их назад. unittest пишет «OK» и
 # «Ran N tests» в stderr; expect собирает 2>&1. Десять тестов, а не «сколько-то».
 expect 0 'OK' -- "$PY" "$HERE/signing_test.py"
-saw 'Ran 10 tests'
+saw 'Ran 11 tests'
 never 'FAILED'
 
 # Ключи README велит класть вне дерева репозитория; selftest тем более.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Регрессии на защиту от повтора: R5 (guard обязателен) и R6 (атомарность ReplayGuard).
 
-    python3 signing_test.py         # 0 — все десять тестов сошлись; ключи не нужны
+    python3 signing_test.py         # 0 — все одиннадцать тестов сошлись; ключи не нужны
 
 Пара Ed25519 генерируется в памяти. Конкурентные тесты утверждают число принятых
 конвертов и согласованность хранилища, а не наличие Lock в исходнике: проверяется
@@ -240,6 +240,15 @@ class ReplayTests(unittest.TestCase):
             self.assertFalse(thread.is_alive(), "A завис на блокировке")
         self.assertEqual(replayed, [False])
         self.assertEqual(len(guard), 1)
+
+    def test_non_finite_now_does_not_move_the_clock(self):
+        # Явный now= двигает общую шкалу необратимо: бесконечность заперла бы guard навсегда.
+        guard = signing.ReplayGuard()
+        env = self.envelope()
+        self.assertFalse(guard.accept(copy.deepcopy(env), now=float("inf")))
+        self.assertFalse(guard.accept(copy.deepcopy(env), now=float("nan")))
+        self.assertEqual(len(guard), 0)
+        self.assertTrue(signing.verify(env, self.public, recipient=ME, guard=guard))
 
     def test_clock_rollback_does_not_revive_nonce(self):
         """Откат системных часов не возвращает вытолкнутый nonce (аудит 23.09.2026).
