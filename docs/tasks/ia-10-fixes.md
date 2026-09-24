@@ -1,6 +1,6 @@
 # Доработка PR #1 по четвёртому проходу аудита 24.09.2026: IA-10
 
-**Status:** executing
+**Status:** done
 **Branch:** review-fixes
 **Worktree:** основной чекаут (`/home/ubuntu/projects/guide-asi`, ветка `review-fixes`)
 **Goal:** Контрпример IA-10 (комментарий PR id=5809729281) воспроизводится на `0401c5e` и не воспроизводится на итоговой вершине: конфиг с `providers[0].transform` отклоняется preflight до вызова promptfoo, тот же конфиг без `transform` даёт 1 FAIL; конфиги гайда принимаются; регрессия в тесте и selftest через настоящий `run.sh`; `sh build/selftest.sh` → 0; CI зелёный; README и описание PR по факту.
@@ -48,4 +48,16 @@ TDD: yes.
 
 up:reviewer по диффу: находок ≥ 80 нет, merge-ready. Проверено: порядок проверок в `provider_problem()`, отсутствие обращения к `PROVIDER_PROFILE` при импорте, единственный вызов `provider_identity()` после `provider_problem()`, объём правки без новых абстракций, числа README.
 
+Сквозной `sh build/selftest.sh` на `fffa6ef` → 0 (два прогона до него падали на `status_check`: дерево менялось коммитами раунда во время прогона).
+
 ## Conclusion
+
+**Goal:** достигнут: контрпример IA-10 воспроизведён на `0401c5e` и закрыт, контроли сохранены, smoke → 0; пуш `fffa6ef` → CI run [35975758470](https://github.com/Andy9542/guide-asi/actions/runs/35975758470) success. Итоговая вершина PR — коммит с этим текстом; его run и описание — в PR #1.
+
+**Invariants:** IV1 (run.sh: 3 до promptfoo, без `transform` 1 FAIL, `delay` и судья с `transform` 3), IV2 (конфиги гайда и прежние случаи 76/56 без изменений), IV3 (smoke → 0, пины не менялись) подтверждены. PC1 соблюдён.
+
+**Deviations:** сверх плана закреплён принимаемый случай `{id, label, config}` (77 случаев) по замечанию проверяющего.
+
+**Deferred:** тип `label` не проверяется (не регрессия, вторая линия даёт INFRA); `transform` провайдера в `config.providers` выгрузки вторая линия не читает (граница та же, что у `assertScoringFunction`); судья `options.provider` с манифестом не сверяется; фикстура lodash видна сканерам (решение автора 24.09.2026: образцы, не бастион).
+
+**Status:** done — IA-10 закрыт, ревью без находок, CI зелёный на `fffa6ef`; описание PR #1 обновлено после зелёного run итоговой вершины.
