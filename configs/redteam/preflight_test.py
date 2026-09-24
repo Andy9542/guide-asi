@@ -534,7 +534,6 @@ def main():
                                          work=case_dir(work, number))
         number += 1
         diffs += not check_single_source("профиль и префиксы — один источник в classify")
-        number += 1
         for case in rejected():
             number += 1
             diffs += not check_rejected(*case, work=case_dir(work, number))
