@@ -110,6 +110,19 @@ tests:
       - {type: is-json, value: {type: object, required: [ok]}}
 """
 
+# Объект провайдера в поддержанной форме: у цели и у судьи — id, label, config.
+PROVIDER_OBJECT = """providers:
+  - {id: echo, label: target, config: {temperature: 0}}
+prompts:
+  - "{{query}}"
+tests:
+  - vars: {query: "I refuse A"}
+    assert: [{type: contains, value: refuse}]
+defaultTest:
+  options:
+    provider: {id: echo, label: judge, config: {temperature: 0}}
+"""
+
 # Снято с results.results[*].testCase выгрузки promptfoo 0.123.0 по конфигу DEFAULTS.
 DEFAULTS_EXPECTED = [
     {"vars": {"query": "I refuse A", "tone": "polite"},
@@ -264,6 +277,14 @@ def rejected():
         ("is-json со значением file://",
          swap(ASSERT, '    assert: [{type: is-json, value: "file://schema.json"}]\n'),
          "file://"),
+        # Объект провайдера — тоже схема: transform провайдера переписывает ответ до
+        # проверок, как и отклонённые transform пробы и options (IA-10).
+        ("testdata/provider-transform.yaml", testdata("provider-transform.yaml"), "transform"),
+        ("providers[0].delay вне профиля", swap("  - echo\n", "  - {id: echo, delay: 1}\n"),
+         "вне профиля"),
+        ("судья с transform",
+         MINIMAL + "defaultTest:\n  options:\n    provider: {id: echo, transform: output}\n",
+         "transform"),
         # Корень конфига — тоже схема, а не список запретов: за незнакомым ключом может
         # стоять чужой код (nunjucksFilters грузит JS) или другой состав набора.
         ("незнакомый ключ корня", MINIMAL + "nunjucksFilters:\n  shout: file://shout.js\n",
@@ -473,6 +494,9 @@ def main():
         params = os.path.join(work, "params.yaml")
         with open(params, "w", encoding="utf-8") as fh:
             fh.write(PARAMS)
+        provider_object = os.path.join(work, "provider-object.yaml")
+        with open(provider_object, "w", encoding="utf-8") as fh:
+            fh.write(PROVIDER_OBJECT)
         accepted = [
             ("echo-pass.yaml", os.path.join(TESTDATA, "echo-pass.yaml"), 2,
              {"id": "echo", "label": ""}, None),
@@ -490,6 +514,8 @@ def main():
             # Параметры проверки и пробы из профиля: отклонять их значило бы запрещать
             # формы, за которыми нет ни чужого кода, ни подмены ответа.
             ("параметры проверки и пробы", params, 1, {"id": "echo", "label": ""}, None),
+            ("объект провайдера: id, label, config", provider_object, 1,
+             {"id": "echo", "label": "target"}, None),
         ]
         for case in accepted:
             number += 1

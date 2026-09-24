@@ -22,7 +22,7 @@
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
 python3 classify_test.py        # классификатор на 56 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 73 случая: что допускается к прогону и что отклоняется
+python3 preflight_test.py       # 77 случаев: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -97,10 +97,15 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 `providers`, `prompts`, `tests`, `defaultTest`, `evaluateOptions` (только `repeat`, и тот
 равен единице); проба — `vars`, `assert`, `threshold`, `description`; `defaultTest` —
 `vars`, `assert` и `options` с единственным ключом `provider` (судья); проверка — `type`,
-`value`, `weight` (число), `metric` (строка). Любой другой ключ `preflight.py` отклоняет
-до запуска. Список запретов пришлось бы пополнять по одному полю за отчёт аудита:
-`assertScoringFunction` отдаёт общее решение пробы чужой функции, `transform`
-переписывает ответ модели до проверок.
+`value`, `weight` (число), `metric` (строка); объект провайдера (целевого и судьи) —
+строка или `id`, `label`, `config`. Любой другой ключ `preflight.py` отклоняет до
+запуска. Список запретов пришлось бы пополнять по одному полю за отчёт аудита:
+`assertScoringFunction` отдаёт общее решение пробы чужой функции; `transform` пробы,
+`options` и провайдера переписывает ответ модели до проверок, причём у провайдера в
+строке выгрузки этого не видно (`response.raw` остаётся исходным, подменён `output`;
+контрпример аудита 24.09.2026, `testdata/provider-transform.yaml`). Содержимое `config`
+провайдера профиль не проверяет: оно принадлежит адаптеру, и постобработку внутри
+адаптера обвязка исключить не может.
 
 Значения — тоже часть профиля: значение проверки обязано быть статической строкой (у
 `*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением),
@@ -170,8 +175,8 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 41 сошедшаяся строка: `classify_test.py` → «расхождений 0» на 56
-выгрузках; `preflight_test.py` → «расхождений 0» на 73 случаях; `sh -n` на `run.sh` и
+прогретом кэше npx), 46 сошедшихся строк: `classify_test.py` → «расхождений 0» на 56
+выгрузках; `preflight_test.py` → «расхождений 0» на 77 случаях; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой

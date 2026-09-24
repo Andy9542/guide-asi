@@ -45,7 +45,7 @@ KEY_REASONS = {
     "providerOutput": "подставляет готовый ответ вместо вызова модели — прогон не измеряет "
                       "цель, а перечитывает конфиг",
     "assertScoringFunction": "отдаёт общее решение пробы чужому коду",
-    "transform": "переписывает ответ модели до проверок",
+    "transform": "переписывает ответ модели до проверок (в пробе, в options и у провайдера)",
     "scenarios": "меняет состав набора",
     "extensions": "исполняет чужие хуки",
     "outputPath": "пишет файлы мимо -o",
@@ -144,14 +144,30 @@ def ambiguous_scalars(node, path="", trail=()):
     return found
 
 
+def provider_problem(value, where):
+    """Почему провайдер вне профиля, или None: строка либо {id, label, config}.
+
+    `transform` провайдера переписывает ответ до проверок так же, как отклонённые
+    `transform` пробы и options; в выгрузке его не видно, ловит только preflight.
+    Содержимое `config` принадлежит адаптеру и не проверяется.
+    """
+    if isinstance(value, str):
+        return None
+    if not isinstance(value, dict):
+        return f"{where}: провайдер задан не строкой и не отображением с id ({type(value).__name__})"
+    why = section_problem(value, PROVIDER_PROFILE, where, "провайдера")
+    if why:
+        return why
+    if not isinstance(value.get("id"), str):
+        return f"{where}.id не строка ({value.get('id')!r})"
+    return None
+
+
 def provider_identity(provider):
     """Идентичность провайдера в том же виде, в каком её пишет в выгрузку promptfoo."""
     if isinstance(provider, str):
         return {"id": provider, "label": ""}
-    if isinstance(provider, dict) and isinstance(provider.get("id"), str):
-        return {"id": provider["id"], "label": provider.get("label") or ""}
-    raise Unsupported(f"провайдер задан не строкой и не отображением с id "
-                      f"({type(provider).__name__})")
+    return {"id": provider["id"], "label": provider.get("label") or ""}
 
 
 def text_problem(value, where):
@@ -227,7 +243,8 @@ EVALUATE_OPTIONS_PROFILE = {"repeat": None}
 TEST_PROFILE = {"vars": None, "assert": None, "threshold": number_problem,
                 "description": text_problem}
 DEFAULT_TEST_PROFILE = {"vars": None, "assert": None, "options": options_problem}
-OPTIONS_PROFILE = {"provider": None}                     # судья, и только он
+OPTIONS_PROFILE = {"provider": provider_problem}         # судья, и только он
+PROVIDER_PROFILE = {"id": None, "label": None, "config": None}
 ASSERT_PROFILE = {"type": None, "value": None, "weight": number_problem,
                   "metric": text_problem}
 
@@ -366,6 +383,9 @@ def single_provider(cfg):
         raise Unsupported("нужен ровно один целевой провайдер в providers: иначе набор — "
                           "матрица «провайдер × проба» (судья в defaultTest.options.provider "
                           "целевым не считается)")
+    why = provider_problem(providers[0], "providers[0]")
+    if why:
+        raise Unsupported(why)
     return provider_identity(providers[0])
 
 

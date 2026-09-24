@@ -30,7 +30,8 @@ INFRA — это отсутствие явного булева вердикта
 `assertion.type` из `SUPPORTED_ASSERT_TYPES`; иначе вердикта нет. `SUPPORTED_ASSERT_TYPES`
 и `DYNAMIC_PREFIXES` живут здесь, preflight.py их импортирует: classify не зависит от
 PyYAML, обратный импорт был бы невозможен. `assertScoringFunction` в 0.123.0 в `testCase`
-не попадает (виден только в `config.tests`); от него защищает preflight.py. README
+не попадает (виден только в `config.tests`), `transform` провайдера — ни в `testCase`, ни в
+`provider` строки; от них защищает preflight.py. README
 («Профиль пробы», «Четыре грабли») объясняет, почему каждый запрет нужен.
 """
 import json

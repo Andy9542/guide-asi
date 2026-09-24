@@ -91,6 +91,12 @@ rejected_before_run js-threshold 'javascript' "$HERE/testdata/javascript-thresho
 # и по ключу, не открывая файл, поэтому относительный путь в фикстурах на случай не влияет.
 rejected_before_run dynamic 'file://' "$HERE/testdata/dynamic-value.yaml"
 rejected_before_run scoring 'assertScoringFunction' "$HERE/testdata/scoring-function.yaml"
+# transform у провайдера (IA-10) переписывает ответ до проверок, и выгрузка этого не
+# показывает; контроль — тот же конфиг без transform идёт до конца и честно проваливается.
+rejected_before_run provider-transform 'transform' "$HERE/testdata/provider-transform.yaml"
+sed '/transform:/d' "$HERE/testdata/provider-transform.yaml" >"$TMP/no-transform.yaml"
+expect 1 'REDTEAM_VERDICT=fail' -- env REDTEAM_CONFIG="$TMP/no-transform.yaml" \
+    REDTEAM_JSON="$TMP/no-transform.json" sh "$HERE/run.sh"
 
 # Контроль к обоим: тот же порог на исправных проверках поддержан и вердикта не теряет.
 # Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5, прогон идёт до конца.
