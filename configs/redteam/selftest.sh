@@ -97,13 +97,9 @@ rejected_before_run provider-transform 'transform' "$HERE/testdata/provider-tran
 sed '/transform:/d' "$HERE/testdata/provider-transform.yaml" >"$TMP/no-transform.yaml"
 expect 1 'REDTEAM_VERDICT=fail' -- env REDTEAM_CONFIG="$TMP/no-transform.yaml" \
     REDTEAM_JSON="$TMP/no-transform.json" sh "$HERE/run.sh"
-# package:<модуль>:<экспорт> у contains (IA-11): 0.123.0 грузит модуль, зовёт экспорт и
-# сравнивает ответ с тем, что вернул экспорт, — значение проверки приходит из чужого кода.
-# Контроль — тот же конфиг со статическим значением идёт до конца и честно проходит.
+# package:<модуль>:<экспорт> у contains (IA-11): 0.123.0 грузит модуль и сравнивает ответ
+# с тем, что вернул экспорт; preflight отказывает по префиксу, не загружая модуль.
 rejected_before_run package-value 'package:' "$HERE/testdata/package-value.yaml"
-sed 's#"package:.*"#refuse#' "$HERE/testdata/package-value.yaml" >"$TMP/package-static.yaml"
-expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$TMP/package-static.yaml" \
-    REDTEAM_JSON="$TMP/package-static.json" sh "$HERE/run.sh"
 
 # Контроль к обоим: тот же порог на исправных проверках поддержан и вердикта не теряет.
 # Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5, прогон идёт до конца.

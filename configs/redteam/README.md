@@ -21,8 +21,8 @@
 
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
-python3 classify_test.py        # классификатор на 57 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 79 случаев: что допускается к прогону и что отклоняется
+python3 classify_test.py        # классификатор на 58 выгрузках в форме promptfoo 0.123.0, без сети
+python3 preflight_test.py       # 81 случай: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -183,8 +183,8 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 51 сошедшаяся строка: `classify_test.py` → «расхождений 0» на 57
-выгрузках; `preflight_test.py` → «расхождений 0» на 79 случаях; `sh -n` на `run.sh` и
+прогретом кэше npx), 50 сошедшихся строк: `classify_test.py` → «расхождений 0» на 58
+выгрузках; `preflight_test.py` → «расхождений 0» на 81 случае; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
@@ -198,12 +198,11 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 `testdata/scoring-function.yaml` (`assertScoringFunction`) → код 3 со строкой про
 `file://` или `assertScoringFunction`, тоже без «Writing output to»; тот же аудит,
 `testdata/package-value.yaml` (`package:` у `contains`) → код 3 со строкой про `package:`
-и без выгрузки, а он же со статическим значением → код 0 и `REDTEAM_VERDICT=pass`; контроль
-`testdata/echo-threshold.yaml` (порог 0.5 на двух исправных `contains`) → код 0,
-`REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке; выгрузка удачного прогона,
-подложенная по пути `REDTEAM_JSON`, после отклонённого прогона не остаётся;
-`REDTEAM_JSON=/dev/full` → код 3 и «не удалось записать»; `results.json` после прогона в
-каталоге не остаётся.
+и без выгрузки; контроль `testdata/echo-threshold.yaml` (порог 0.5 на двух исправных
+`contains`) → код 0, `REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке;
+выгрузка удачного прогона, подложенная по пути `REDTEAM_JSON`, после отклонённого
+прогона не остаётся; `REDTEAM_JSON=/dev/full` → код 3 и «не удалось записать»;
+`results.json` после прогона в каталоге не остаётся.
 
 Фикстуры `testdata/echo-*.yaml` работают на провайдере `echo`: он возвращает промпт как
 ответ модели, поэтому исходы 0 и 1 selftest доказывает без шлюза, модели и сети. Сеть к

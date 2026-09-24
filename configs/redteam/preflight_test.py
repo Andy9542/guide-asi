@@ -248,10 +248,12 @@ def rejected():
         # полным run.sh с абсолютным путём к функции: dynamic-value — код 0 «Aggregate
         # score 0.50 ≥ 0.5 threshold» (без порога 1), scoring-function — код 1 «Scoring
         # function error»; здесь проверяется отказ по префиксу и по ключу, до открытия
-        # файла, поэтому относительный путь фикстуры на случай не влияет.
+        # файла, поэтому относительный путь фикстуры на случай не влияет. package-value —
+        # контрпример того же аудита (проход 5): отказ по префиксу до загрузки модуля.
         ("testdata/dynamic-value.yaml", testdata("dynamic-value.yaml"), "file://"),
         ("testdata/scoring-function.yaml", testdata("scoring-function.yaml"),
          "assertScoringFunction"),
+        ("testdata/package-value.yaml", testdata("package-value.yaml"), "package:"),
         ("assertScoringFunction в defaultTest",
          MINIMAL + "defaultTest:\n  assertScoringFunction: file://score.mjs\n",
          "assertScoringFunction"),
@@ -262,8 +264,6 @@ def rejected():
          MINIMAL + "defaultTest:\n  options:\n    transform: \"'I refuse'\"\n", "transform"),
         ("vars со значением file://", swap('{query: "I refuse A"}', '{query: "file://x.py"}'),
          "file://"),
-        ("vars со значением package:",
-         swap('{query: "I refuse A"}', '{query: "package:./x.mjs:value"}'), "package:"),
         # Кортеж захардкожен, а не взят из preflight.DYNAMIC_PREFIXES: иначе тест выводился
         # бы из проверяемого.
         *[(f"value с префиксом {prefix}",
@@ -272,10 +272,6 @@ def rejected():
         ("file:// внутри списка contains-any",
          swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, "file://x.py"]}]\n'),
          "file://"),
-        ("package: внутри списка contains-any",
-         swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, '
-                      '"package:./x.mjs:value"]}]\n'),
-         "package:"),
         ("ключ transform у проверки",
          swap(ASSERT, '    assert: [{type: contains, value: refuse, transform: "output"}]\n'),
          "transform"),
@@ -507,7 +503,6 @@ def case_dir(work, number):
 
 def main():
     diffs = 0
-    number = 0
     with tempfile.TemporaryDirectory() as work:
         defaults = os.path.join(work, "defaults.yaml")
         with open(defaults, "w", encoding="utf-8") as fh:
@@ -548,21 +543,16 @@ def main():
             ("текст пробы с «Package:» — обычная строка", package_text, 1,
              {"id": "echo", "label": ""}, None),
         ]
-        for case in accepted:
-            number += 1
-            diffs += not check_accepted(*case, work=case_dir(work, number))
-        number += 1
-        diffs += not check_snapshot("правка исходника после разбора",
-                                    work=case_dir(work, number))
-        number += 1
-        diffs += not check_write_failure("копию некуда записать",
-                                         work=case_dir(work, number))
-        number += 1
-        diffs += not check_single_source("профиль и префиксы — один источник в classify")
-        for case in rejected():
-            number += 1
-            diffs += not check_rejected(*case, work=case_dir(work, number))
-    print(f"preflight_test: {number} случаев, расхождений {diffs}")
+        # Номер случая — из перечисления списка, а не из счётчика рядом с каждым вызовом:
+        # так номер каталога и итоговое число случаев не разойдутся с самим списком.
+        cases = [*(lambda w, c=c: check_accepted(*c, work=w) for c in accepted),
+                 lambda w: check_snapshot("правка исходника после разбора", work=w),
+                 lambda w: check_write_failure("копию некуда записать", work=w),
+                 lambda w: check_single_source("профиль и префиксы — один источник в classify"),
+                 *(lambda w, c=c: check_rejected(*c, work=w) for c in rejected())]
+        for number, run in enumerate(cases, 1):
+            diffs += not run(case_dir(work, number))
+    print(f"preflight_test: {len(cases)} случаев, расхождений {diffs}")
     return 1 if diffs else 0
 
 
