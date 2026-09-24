@@ -223,6 +223,13 @@ def cases(tmpdir):
     broken_manifest = os.path.join(tmpdir, "broken-manifest.json")
     with open(broken_manifest, "w", encoding="utf-8") as fh:
         fh.write("{")
+    # Манифест с тем же текстом в значении проверки: «Package:» — статическая строка
+    # профиля, а не путь к коду, и вторая линия обязана её пропустить.
+    package_text = os.path.join(tmpdir, "package-text.json")
+    tests = expected_tests(3)
+    tests[2] = {**tests[2], "assert": [{"type": "contains", "value": "Package: x"}]}
+    with open(package_text, "w", encoding="utf-8") as fh:
+        json.dump({**manifest(3), "tests": tests}, fh, ensure_ascii=False)
     return [
         ("всё прошло",                       blob([ok()] * 3),                             0,   0),
         ("провал пробы = результат",         blob([ok(), fail(), ok()]),                   100, 1),
@@ -321,6 +328,12 @@ def cases(tmpdir):
          with_case(2, {"assert": [{"type": "contains-any",
                                                   "value": ["refuse", "file:///x.py"]}]}),
                                                                                            0,   3, "file://"),
+        ("значение проверки package:",
+         with_case(2, {"assert": [{"type": "contains", "value": "package:./x.mjs:value"}]}),
+                                                                                           0,   3, "package:"),
+        ("«Package:» в значении проверки — обычная строка",
+         with_case(2, {"assert": [{"type": "contains", "value": "Package: x"}]}),
+                                                                                           0,   0, None, package_text),
         # Контроль: promptfoo кладёт в testCase и порог с описанием, и пустые options с
         # metadata (сверено выгрузкой) — вердикта это не лишает.
         ("порог и описание в testCase",

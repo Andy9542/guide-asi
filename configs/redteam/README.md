@@ -21,8 +21,8 @@
 
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
-python3 classify_test.py        # классификатор на 56 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 77 случаев: что допускается к прогону и что отклоняется
+python3 classify_test.py        # классификатор на 58 выгрузках в форме promptfoo 0.123.0, без сети
+python3 preflight_test.py       # 85 случаев: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -98,14 +98,19 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 равен единице); проба — `vars`, `assert`, `threshold`, `description`; `defaultTest` —
 `vars`, `assert` и `options` с единственным ключом `provider` (судья); проверка — `type`,
 `value`, `weight` (число), `metric` (строка); объект провайдера (целевого и судьи) —
-строка или `id`, `label`, `config`. Любой другой ключ `preflight.py` отклоняет до
-запуска. Список запретов пришлось бы пополнять по одному полю за отчёт аудита:
-`assertScoringFunction` отдаёт общее решение пробы чужой функции; `transform` пробы,
-`options` и провайдера переписывает ответ модели до проверок, причём у провайдера в
-строке выгрузки этого не видно (`response.raw` остаётся исходным, подменён `output`;
-контрпример аудита 24.09.2026, `testdata/provider-transform.yaml`). Содержимое `config`
-провайдера профиль не проверяет: оно принадлежит адаптеру, и постобработку внутри
-адаптера обвязка исключить не может.
+строка или `id`, `label`, `config`, где `id` — `echo` (самопроверка) или
+`openai:chat:<модель>` (чат через OpenAI-совместимый шлюз, адрес в `config.apiBaseUrl`):
+другие виды провайдеров promptfoo исполняет как код (`exec:`, `file://`, `package:`,
+файлы `.js`/`.py`, `openai:codex-*` запускает локальный процесс) или ведёт мимо шлюза,
+и профиль их не принимает. Любой другой ключ `preflight.py` отклоняет до запуска. Список
+запретов пришлось бы пополнять по одному полю за отчёт аудита: `assertScoringFunction`
+отдаёт общее решение пробы чужой функции; `transform` пробы, `options` и провайдера
+переписывает ответ модели до проверок, причём у провайдера в строке выгрузки этого не
+видно (`response.raw` остаётся исходным, подменён `output`; контрпример аудита
+24.09.2026, `testdata/provider-transform.yaml`). Содержимое `config` провайдера профиль
+не проверяет: оно принадлежит адаптеру, и постобработку внутри адаптера обвязка
+исключить не может; через `config` в 0.123.0 подключается и код
+(`functionToolCallbacks`, `mcp` со своей командой) — это тоже выбор автора конфига.
 
 Значения — тоже часть профиля: значение проверки обязано быть статической строкой (у
 `*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением),
@@ -122,6 +127,15 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 код 1, то есть обвинение модели в сбое чужого кода; второй давал код 1 и FAIL с
 причиной «Scoring function error: …». Теперь `preflight.py` отклоняет оба до запуска
 promptfoo.
+
+`package:<модуль>:<экспорт>` — пятый префикс того же списка: в 0.123.0 у того же
+`contains` грузит модуль и зовёт из него экспорт: с абсолютным путём к модулю прогон
+давал код 0 и `REDTEAM_VERDICT=pass` при `metadata.renderedAssertionValue = "refuse"`,
+то есть значение проверки пришло из чужого кода; у переменной `package:` так же грузит
+модуль и подставляет то, что вернул экспорт (контрпример аудита 24.09.2026,
+`testdata/package-value.yaml`). Относительный путь promptfoo ищет от каталога копии
+конфига и модуля не находит — для ручного воспроизведения нужен абсолютный путь к
+`testdata/package-helper.mjs`.
 
 **Типы проверок.** `preflight.py` принимает только типы с проверенным контрактом ошибок:
 `contains`, `icontains`, `not-contains`, `not-icontains`, `equals`, `starts-with`,
@@ -152,7 +166,7 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 дал бы INFRA уже после вызова модели.
 
 Вторая линия живёт в `classify.py`: компонент обязан нести `assertion.type` из того же
-профиля (`SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` объявлены в `classify.py`,
+профиля (`SUPPORTED_ASSERT_TYPES` и `dynamic_prefix` объявлены в `classify.py`,
 `preflight.py` их импортирует, `preflight_test.py` проверяет тождество). Компонент без
 `assertion` (так приходит группа `assert-set`) или с типом вне профиля вердикта не даёт.
 Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`,
@@ -175,8 +189,8 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 46 сошедшихся строк: `classify_test.py` → «расхождений 0» на 56
-выгрузках; `preflight_test.py` → «расхождений 0» на 77 случаях; `sh -n` на `run.sh` и
+прогретом кэше npx), 50 сошедшихся строк: `classify_test.py` → «расхождений 0» на 58
+выгрузках; `preflight_test.py` → «расхождений 0» на 85 случаях; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
@@ -188,12 +202,13 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 `javascript`, без «Writing output to» и без выгрузки; контрпримеры аудита 24.09.2026
 `testdata/dynamic-value.yaml` (динамическое значение у `contains`) и
 `testdata/scoring-function.yaml` (`assertScoringFunction`) → код 3 со строкой про
-`file://` или `assertScoringFunction`, тоже без «Writing output to»; контроль
-`testdata/echo-threshold.yaml` (порог 0.5 на двух исправных `contains`) → код 0,
-`REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке; выгрузка удачного прогона,
-подложенная по пути `REDTEAM_JSON`, после отклонённого прогона не остаётся;
-`REDTEAM_JSON=/dev/full` → код 3 и «не удалось записать»; `results.json` после прогона в
-каталоге не остаётся.
+`file://` или `assertScoringFunction`, тоже без «Writing output to»; тот же аудит,
+`testdata/package-value.yaml` (`package:` у `contains`) → код 3 со строкой про
+`package:` и без выгрузки; контроль `testdata/echo-threshold.yaml` (порог 0.5 на двух
+исправных `contains`) → код 0, `REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в
+выгрузке; выгрузка удачного прогона, подложенная по пути `REDTEAM_JSON`, после
+отклонённого прогона не остаётся; `REDTEAM_JSON=/dev/full` → код 3 и «не удалось
+записать»; `results.json` после прогона в каталоге не остаётся.
 
 Фикстуры `testdata/echo-*.yaml` работают на провайдере `echo`: он возвращает промпт как
 ответ модели, поэтому исходы 0 и 1 selftest доказывает без шлюза, модели и сети. Сеть к

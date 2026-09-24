@@ -28,7 +28,7 @@ INFRA — это отсутствие явного булева вердикта
 `TESTCASE_KEYS` (форма экспорта 0.123.0 для профиля; в `options` только судья
 `provider`), значения проверок без динамических префиксов, компонент несёт
 `assertion.type` из `SUPPORTED_ASSERT_TYPES`; иначе вердикта нет. `SUPPORTED_ASSERT_TYPES`
-и `DYNAMIC_PREFIXES` живут здесь, preflight.py их импортирует: classify не зависит от
+и `dynamic_prefix` живут здесь, preflight.py их импортирует: classify не зависит от
 PyYAML, обратный импорт был бы невозможен. `assertScoringFunction` в 0.123.0 в `testCase`
 не попадает (виден только в `config.tests`), `transform` провайдера — ни в `testCase`, ни в
 `provider` строки; от них защищает preflight.py. README
@@ -53,10 +53,14 @@ SUPPORTED_ASSERT_TYPES = frozenset({
 })
 # Префиксы, за которыми promptfoo берёт значение не из конфига: `file://` у значения
 # проверки в 0.123.0 грузит .py/.js и зовёт функцию из него даже у разрешённого
-# `contains` (замер в README, «Профиль пробы»). `python:`, `javascript:` и `js:` у value в
-# 0.123.0 не действуют; обе линии отклоняют их заранее, чтобы не следить, когда очередная
-# версия их включит.
-DYNAMIC_PREFIXES = ("file://", "python:", "javascript:", "js:")
+# `contains` (замер в README, «Профиль пробы»). `package:<модуль>:<экспорт>` там же
+# грузит модуль и зовёт из него экспорт, сравнивая ответ с тем, что вернул экспорт
+# (`src/assertions/index.ts`, ветка `isPackagePath`; `src/providers/packageParser.ts`;
+# контрпример аудита 24.09.2026, `testdata/package-value.yaml`); у ПЕРЕМЕННОЙ (vars)
+# `package:` так же грузит модуль и подставляет то, что вернул экспорт. `python:`,
+# `javascript:` и `js:` у value в 0.123.0 не действуют; обе линии отклоняют их заранее,
+# чтобы не следить, когда очередная версия их включит.
+DYNAMIC_PREFIXES = ("file://", "package:", "python:", "javascript:", "js:")
 
 # Форма testCase в экспорте 0.123.0 для поддержанного профиля (мы сняли её живым
 # прогоном): `options` и `metadata` promptfoo кладёт всегда, пустыми. Чужой ключ — это
@@ -167,11 +171,16 @@ def check_identity(position, row, manifest):
 
 
 def dynamic_prefix(value):
-    """Префикс, по которому promptfoo взял бы значение не из конфига, или None."""
+    """Префикс, по которому promptfoo взял бы значение не из конфига, или None.
+
+    Совпадение точное, как у promptfoo (startsWith без приведения регистра): «Package: …»
+    в тексте пробы — обычная строка. Шире promptfoo обе линии в одном: элемент списка
+    (contains-any/-all) с префиксом 0.123.0 не грузит, а профиль всё равно требует
+    статической строки.
+    """
     if not isinstance(value, str):
         return None
-    lowered = value.lower()
-    return next((prefix for prefix in DYNAMIC_PREFIXES if lowered.startswith(prefix)), None)
+    return next((prefix for prefix in DYNAMIC_PREFIXES if value.startswith(prefix)), None)
 
 
 def foreign_key_text(key):
@@ -196,14 +205,14 @@ def reject_foreign_case_keys(position, case):
 
 
 def reject_dynamic_values(position, case):
-    """Значение проверки с динамическим префиксом — проверку выполнял чужой код."""
+    """Значение проверки с динамическим префиксом — не из профиля статических строк."""
     for index, item in enumerate(case.get("assert") or []):
         value = item.get("value") if isinstance(item, dict) else None
         for one in value if isinstance(value, list) else [value]:
             prefix = dynamic_prefix(one)
             if prefix:
                 infra(f"#{position}: assert[{index}].value в testCase начинается с {prefix} — "
-                      "проверку выполнял код по этому пути, а не сравнение из профиля")
+                      "значение проверки не статическая строка профиля, а путь к коду")
 
 
 def check_test_case(position, row, expected):

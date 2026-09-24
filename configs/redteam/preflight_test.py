@@ -123,6 +123,17 @@ defaultTest:
     provider: {id: echo, label: judge, config: {temperature: 0}}
 """
 
+# «Package:» в тексте пробы — обычная строка: promptfoo сравнивает префикс как есть, и с
+# заглавной буквы он не делает из значения путь к коду.
+PACKAGE_TEXT = """providers:
+  - echo
+prompts:
+  - "{{query}}"
+tests:
+  - vars: {query: "Package: left-pad — ставить или нет?"}
+    assert: [{type: contains, value: left-pad}]
+"""
+
 # Снято с results.results[*].testCase выгрузки promptfoo 0.123.0 по конфигу DEFAULTS.
 DEFAULTS_EXPECTED = [
     {"vars": {"query": "I refuse A", "tone": "polite"},
@@ -237,10 +248,12 @@ def rejected():
         # полным run.sh с абсолютным путём к функции: dynamic-value — код 0 «Aggregate
         # score 0.50 ≥ 0.5 threshold» (без порога 1), scoring-function — код 1 «Scoring
         # function error»; здесь проверяется отказ по префиксу и по ключу, до открытия
-        # файла, поэтому относительный путь фикстуры на случай не влияет.
+        # файла, поэтому относительный путь фикстуры на случай не влияет. package-value —
+        # контрпример того же аудита (проход 5): отказ по префиксу до загрузки модуля.
         ("testdata/dynamic-value.yaml", testdata("dynamic-value.yaml"), "file://"),
         ("testdata/scoring-function.yaml", testdata("scoring-function.yaml"),
          "assertScoringFunction"),
+        ("testdata/package-value.yaml", testdata("package-value.yaml"), "package:"),
         ("assertScoringFunction в defaultTest",
          MINIMAL + "defaultTest:\n  assertScoringFunction: file://score.mjs\n",
          "assertScoringFunction"),
@@ -255,7 +268,7 @@ def rejected():
         # бы из проверяемого.
         *[(f"value с префиксом {prefix}",
            swap(ASSERT, f'    assert: [{{type: contains, value: "{prefix} 1 + 1"}}]\n'), prefix)
-          for prefix in ("python:", "javascript:", "js:")],
+          for prefix in ("python:", "javascript:", "js:", "package:")],
         ("file:// внутри списка contains-any",
          swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, "file://x.py"]}]\n'),
          "file://"),
@@ -285,6 +298,23 @@ def rejected():
         ("судья с transform",
          MINIMAL + "defaultTest:\n  options:\n    provider: {id: echo, transform: output}\n",
          "transform"),
+        # id провайдера — echo или openai:chat:<модель> через шлюз: остальное promptfoo
+        # исполняет как код (exec:, file://, package:, голый файл .js, openai:codex-*
+        # спавнит локальный процесс) или ведёт мимо шлюза, и это случается раньше, чем
+        # несовпадение с манифестом станет INFRA.
+        ("providers[0] с package:", swap("  - echo\n", "  - \"package:./x.mjs:Provider\"\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] — файл .js", swap("  - echo\n", "  - evil.js\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] с exec:", swap("  - echo\n", "  - \"exec: touch x\"\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] openai:codex-app-server", swap("  - echo\n", "  - openai:codex-app-server\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] openai:chat: без модели", swap("  - echo\n", "  - \"openai:chat:\"\n"),
+         "вне профиля провайдеров"),
+        ("судья с file://",
+         MINIMAL + "defaultTest:\n  options:\n    provider: {id: \"file://judge.js\"}\n",
+         "вне профиля провайдеров"),
         # Корень конфига — тоже схема, а не список запретов: за незнакомым ключом может
         # стоять чужой код (nunjucksFilters грузит JS) или другой состав набора.
         ("незнакомый ключ корня", MINIMAL + "nunjucksFilters:\n  shout: file://shout.js\n",
@@ -483,7 +513,6 @@ def case_dir(work, number):
 
 def main():
     diffs = 0
-    number = 0
     with tempfile.TemporaryDirectory() as work:
         defaults = os.path.join(work, "defaults.yaml")
         with open(defaults, "w", encoding="utf-8") as fh:
@@ -497,6 +526,9 @@ def main():
         provider_object = os.path.join(work, "provider-object.yaml")
         with open(provider_object, "w", encoding="utf-8") as fh:
             fh.write(PROVIDER_OBJECT)
+        package_text = os.path.join(work, "package-text.yaml")
+        with open(package_text, "w", encoding="utf-8") as fh:
+            fh.write(PACKAGE_TEXT)
         accepted = [
             ("echo-pass.yaml", os.path.join(TESTDATA, "echo-pass.yaml"), 2,
              {"id": "echo", "label": ""}, None),
@@ -516,23 +548,21 @@ def main():
             ("параметры проверки и пробы", params, 1, {"id": "echo", "label": ""}, None),
             ("объект провайдера: id, label, config", provider_object, 1,
              {"id": "echo", "label": "target"}, None),
+            # Префикс совпадает точно: «Package:» в тексте пробы — обычная строка, и
+            # отклонять её значило бы запрещать слово в вопросе к модели.
+            ("текст пробы с «Package:» — обычная строка", package_text, 1,
+             {"id": "echo", "label": ""}, None),
         ]
-        for case in accepted:
-            number += 1
-            diffs += not check_accepted(*case, work=case_dir(work, number))
-        number += 1
-        diffs += not check_snapshot("правка исходника после разбора",
-                                    work=case_dir(work, number))
-        number += 1
-        diffs += not check_write_failure("копию некуда записать",
-                                         work=case_dir(work, number))
-        number += 1
-        diffs += not check_single_source("профиль и префиксы — один источник в classify")
-        number += 1
-        for case in rejected():
-            number += 1
-            diffs += not check_rejected(*case, work=case_dir(work, number))
-    print(f"preflight_test: {number} случаев, расхождений {diffs}")
+        # Номер случая — из перечисления списка, а не из счётчика рядом с каждым вызовом:
+        # так номер каталога и итоговое число случаев не разойдутся с самим списком.
+        cases = [*(lambda w, c=c: check_accepted(*c, work=w) for c in accepted),
+                 lambda w: check_snapshot("правка исходника после разбора", work=w),
+                 lambda w: check_write_failure("копию некуда записать", work=w),
+                 lambda w: check_single_source("профиль и префиксы — один источник в classify"),
+                 *(lambda w, c=c: check_rejected(*c, work=w) for c in rejected())]
+        for number, run in enumerate(cases, 1):
+            diffs += not run(case_dir(work, number))
+    print(f"preflight_test: {len(cases)} случаев, расхождений {diffs}")
     return 1 if diffs else 0
 
 

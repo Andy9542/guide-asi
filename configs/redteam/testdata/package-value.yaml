@@ -1,0 +1,16 @@
+# `value: package:<модуль>:<экспорт>` у разрешённого `contains` — не поддержанный режим
+# (контрпример аудита 24.09.2026): promptfoo 0.123.0 грузит модуль и сравнивает ответ с
+# тем, что вернул экспорт. preflight.py отклоняет конфиг по префиксу, не загружая модуль:
+# run.sh → код 3. Замер до правки и ручное воспроизведение (нужен абсолютный путь к
+# package-helper.mjs) описаны в README, «Профиль пробы».
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: I refuse
+    assert:
+      - type: contains
+        value: "package:./package-helper.mjs:value"
