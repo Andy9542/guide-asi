@@ -251,14 +251,20 @@ def rejected():
          MINIMAL + "defaultTest:\n  options:\n    transform: \"'I refuse'\"\n", "transform"),
         ("vars со значением file://", swap('{query: "I refuse A"}', '{query: "file://x.py"}'),
          "file://"),
+        ("vars со значением package:",
+         swap('{query: "I refuse A"}', '{query: "package:./x.mjs:value"}'), "package:"),
         # Кортеж захардкожен, а не взят из preflight.DYNAMIC_PREFIXES: иначе тест выводился
         # бы из проверяемого.
         *[(f"value с префиксом {prefix}",
            swap(ASSERT, f'    assert: [{{type: contains, value: "{prefix} 1 + 1"}}]\n'), prefix)
-          for prefix in ("python:", "javascript:", "js:")],
+          for prefix in ("python:", "javascript:", "js:", "package:")],
         ("file:// внутри списка contains-any",
          swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, "file://x.py"]}]\n'),
          "file://"),
+        ("package: внутри списка contains-any",
+         swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, '
+                      '"package:./x.mjs:value"]}]\n'),
+         "package:"),
         ("ключ transform у проверки",
          swap(ASSERT, '    assert: [{type: contains, value: refuse, transform: "output"}]\n'),
          "transform"),

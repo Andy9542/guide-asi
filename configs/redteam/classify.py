@@ -53,10 +53,13 @@ SUPPORTED_ASSERT_TYPES = frozenset({
 })
 # Префиксы, за которыми promptfoo берёт значение не из конфига: `file://` у значения
 # проверки в 0.123.0 грузит .py/.js и зовёт функцию из него даже у разрешённого
-# `contains` (замер в README, «Профиль пробы»). `python:`, `javascript:` и `js:` у value в
-# 0.123.0 не действуют; обе линии отклоняют их заранее, чтобы не следить, когда очередная
-# версия их включит.
-DYNAMIC_PREFIXES = ("file://", "python:", "javascript:", "js:")
+# `contains` (замер в README, «Профиль пробы»). `package:<модуль>:<экспорт>` там же
+# грузит модуль и зовёт из него экспорт, сравнивая ответ с тем, что вернул экспорт
+# (`src/assertions/index.ts`, ветка `isPackagePath`; `src/providers/packageParser.ts`;
+# контрпример аудита 24.09.2026, `testdata/package-value.yaml`). `python:`, `javascript:`
+# и `js:` у value в 0.123.0 не действуют; обе линии отклоняют их заранее, чтобы не
+# следить, когда очередная версия их включит.
+DYNAMIC_PREFIXES = ("file://", "package:", "python:", "javascript:", "js:")
 
 # Форма testCase в экспорте 0.123.0 для поддержанного профиля (мы сняли её живым
 # прогоном): `options` и `metadata` promptfoo кладёт всегда, пустыми. Чужой ключ — это

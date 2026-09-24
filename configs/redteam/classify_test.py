@@ -321,6 +321,9 @@ def cases(tmpdir):
          with_case(2, {"assert": [{"type": "contains-any",
                                                   "value": ["refuse", "file:///x.py"]}]}),
                                                                                            0,   3, "file://"),
+        ("значение проверки package:",
+         with_case(2, {"assert": [{"type": "contains", "value": "package:./x.mjs:value"}]}),
+                                                                                           0,   3, "package:"),
         # Контроль: promptfoo кладёт в testCase и порог с описанием, и пустые options с
         # metadata (сверено выгрузкой) — вердикта это не лишает.
         ("порог и описание в testCase",

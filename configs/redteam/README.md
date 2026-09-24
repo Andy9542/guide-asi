@@ -21,8 +21,8 @@
 
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
-python3 classify_test.py        # классификатор на 56 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 77 случаев: что допускается к прогону и что отклоняется
+python3 classify_test.py        # классификатор на 57 выгрузках в форме promptfoo 0.123.0, без сети
+python3 preflight_test.py       # 80 случаев: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -108,20 +108,24 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 адаптера обвязка исключить не может.
 
 Значения — тоже часть профиля: значение проверки обязано быть статической строкой (у
-`*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением),
-значение переменной — статическим скаляром. Префиксы `file://`, `python:`, `javascript:`
+`*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением), значение
+переменной — статическим скаляром. Префиксы `file://`, `package:`, `python:`, `javascript:`
 и `js:` `preflight.py` отклоняет: в 0.123.0 `value: file://check.py` у разрешённого
 `contains` грузит файл и зовёт из него функцию, а её исключение приходит компонентом
 `pass: false` без `metadata.graderError`. Мы замерили это полным `run.sh` по конфигам
-`testdata/dynamic-value.yaml` и `testdata/scoring-function.yaml`, заменив путь к функции
-на абсолютный. В файлах путь относительный, а прогон идёт по копии конфига во временном
-каталоге, где соседнего файла нет: до правки promptfoo пытался исполнить функцию по
-этому пути, получал FileNotFoundError и тем же агрегатом давал код 0. С абсолютным путём
-первый конфиг давал код 0 и `REDTEAM_VERDICT=pass` с причиной «Aggregate score 0.50 ≥
-0.5 threshold» (порог зачёл сорвавшуюся проверку наравне с состоявшейся), а без порога
-код 1, то есть обвинение модели в сбое чужого кода; второй давал код 1 и FAIL с
-причиной «Scoring function error: …». Теперь `preflight.py` отклоняет оба до запуска
-promptfoo.
+`testdata/dynamic-value.yaml` и `testdata/scoring-function.yaml`, заменив путь к функции на
+абсолютный. В файлах путь относительный, а прогон идёт по копии конфига во временном
+каталоге, где соседнего файла нет: до правки promptfoo пытался исполнить функцию по этому
+пути, получал FileNotFoundError и тем же агрегатом давал код 0. С абсолютным путём первый
+конфиг давал код 0 и `REDTEAM_VERDICT=pass` с причиной «Aggregate score 0.50 ≥ 0.5
+threshold» (порог зачёл сорвавшуюся проверку наравне с состоявшейся), а без порога код 1, то
+есть обвинение модели в сбое чужого кода; второй давал код 1 и FAIL с причиной «Scoring
+function error: …». Теперь `preflight.py` отклоняет оба до запуска promptfoo.
+`package:<модуль>:<экспорт>` в 0.123.0 у того же `contains` грузит модуль, зовёт из него
+экспорт и сравнивает ответ с тем, что экспорт вернул: с абсолютным путём к
+`testdata/package-helper.mjs` прогон давал код 0 и `REDTEAM_VERDICT=pass` при
+`metadata.renderedAssertionValue = "refuse"`, то есть значение проверки пришло из чужого
+кода (контрпример аудита 24.09.2026, `testdata/package-value.yaml`).
 
 **Типы проверок.** `preflight.py` принимает только типы с проверенным контрактом ошибок:
 `contains`, `icontains`, `not-contains`, `not-icontains`, `equals`, `starts-with`,
@@ -155,12 +159,13 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 профиля (`SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` объявлены в `classify.py`,
 `preflight.py` их импортирует, `preflight_test.py` проверяет тождество). Компонент без
 `assertion` (так приходит группа `assert-set`) или с типом вне профиля вердикта не даёт.
-Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`,
-`transform`, `options.transform`, `provider`, `providerOutput` или значение проверки с
-динамическим префиксом. Полной формы экспорта вторая линия не знает: в 0.123.0
-`transform` и значение проверки в `testCase` видны, а `assertScoringFunction` остаётся
-только в `config.tests`; состав наследуемых полей меняется с версией, и линия держится за
-то, чего в пробе быть не должно.
+Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`, `transform`,
+`options.transform`, `provider`, `providerOutput` или значение проверки с динамическим
+префиксом, включая `package:` (в 0.123.0 он грузит модуль и зовёт из него экспорт;
+контрпример аудита 24.09.2026, `testdata/package-value.yaml`). Полной формы экспорта вторая
+линия не знает: в 0.123.0 `transform` и значение проверки в `testCase` видны, а
+`assertScoringFunction` остаётся только в `config.tests`; состав наследуемых полей меняется
+с версией, и линия держится за то, чего в пробе быть не должно.
 
 `regex` и `not-regex` тоже вне профиля: некорректный шаблон в 0.123.0 приходит
 компонентом `pass: false` с причиной «Invalid regex pattern: …» без
@@ -175,8 +180,8 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 46 сошедшихся строк: `classify_test.py` → «расхождений 0» на 56
-выгрузках; `preflight_test.py` → «расхождений 0» на 77 случаях; `sh -n` на `run.sh` и
+прогретом кэше npx), 51 сошедшаяся строка: `classify_test.py` → «расхождений 0» на 57
+выгрузках; `preflight_test.py` → «расхождений 0» на 80 случаях; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
@@ -188,7 +193,9 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 `javascript`, без «Writing output to» и без выгрузки; контрпримеры аудита 24.09.2026
 `testdata/dynamic-value.yaml` (динамическое значение у `contains`) и
 `testdata/scoring-function.yaml` (`assertScoringFunction`) → код 3 со строкой про
-`file://` или `assertScoringFunction`, тоже без «Writing output to»; контроль
+`file://` или `assertScoringFunction`, тоже без «Writing output to»; тот же аудит,
+`testdata/package-value.yaml` (`package:` у `contains`) → код 3 со строкой про `package:`
+и без выгрузки, а он же со статическим значением → код 0 и `REDTEAM_VERDICT=pass`; контроль
 `testdata/echo-threshold.yaml` (порог 0.5 на двух исправных `contains`) → код 0,
 `REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке; выгрузка удачного прогона,
 подложенная по пути `REDTEAM_JSON`, после отклонённого прогона не остаётся;
