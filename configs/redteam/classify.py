@@ -28,7 +28,7 @@ INFRA — это отсутствие явного булева вердикта
 `TESTCASE_KEYS` (форма экспорта 0.123.0 для профиля; в `options` только судья
 `provider`), значения проверок без динамических префиксов, компонент несёт
 `assertion.type` из `SUPPORTED_ASSERT_TYPES`; иначе вердикта нет. `SUPPORTED_ASSERT_TYPES`
-и `DYNAMIC_PREFIXES` живут здесь, preflight.py их импортирует: classify не зависит от
+и `dynamic_prefix` живут здесь, preflight.py их импортирует: classify не зависит от
 PyYAML, обратный импорт был бы невозможен. `assertScoringFunction` в 0.123.0 в `testCase`
 не попадает (виден только в `config.tests`), `transform` провайдера — ни в `testCase`, ни в
 `provider` строки; от них защищает preflight.py. README

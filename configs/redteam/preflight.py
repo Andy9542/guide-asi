@@ -149,11 +149,11 @@ def provider_problem(value, where):
 
     `transform` провайдера переписывает ответ до проверок так же, как отклонённые
     `transform` пробы и options; в выгрузке его не видно, ловит только preflight.
-    Содержимое `config` принадлежит адаптеру и не проверяется. Сам id — без исполняемых
-    префиксов: по ним promptfoo грузит провайдера из файла или модуля и исполняет его код.
+    Содержимое `config` принадлежит адаптеру и не проверяется. Сам id — `echo` или
+    `openai:…`: остальные виды провайдеров promptfoo исполняет как код или ведёт мимо шлюза.
     """
     if isinstance(value, str):
-        return executable_id_problem(value, where)
+        return provider_id_problem(value, where)
     if not isinstance(value, dict):
         return f"{where}: провайдер задан не строкой и не отображением с id ({type(value).__name__})"
     why = section_problem(value, PROVIDER_PROFILE, where, "провайдера")
@@ -161,16 +161,19 @@ def provider_problem(value, where):
         return why
     if not isinstance(value.get("id"), str):
         return f"{where}.id не строка ({value.get('id')!r})"
-    return executable_id_problem(value["id"], f"{where}.id")
+    return provider_id_problem(value["id"], f"{where}.id")
 
 
-def executable_id_problem(provider_id, where):
-    """Почему id провайдера ведёт к чужому коду, или None."""
-    prefix = dynamic_prefix(provider_id)
-    if prefix:
-        return (f"{where} начинается с {prefix} — promptfoo загрузит провайдера из файла "
-                "или модуля по этому пути и выполнит его код")
-    return None
+def provider_id_problem(provider_id, where):
+    """Почему id провайдера вне профиля, или None: `echo` либо `openai:…` через шлюз.
+
+    Остальные виды провайдеров promptfoo исполняет как код (`exec:`, `file://`,
+    `package:`, файлы .js/.py) или ведёт мимо шлюза; перечислять их по одному бесполезно.
+    """
+    if provider_id == "echo" or provider_id.startswith("openai:"):
+        return None
+    return (f"{where} вне профиля провайдеров ({provider_id!r}): принимаются echo и openai:… "
+            "через шлюз, остальные promptfoo исполняет как код или ведёт мимо шлюза")
 
 
 def provider_identity(provider):
