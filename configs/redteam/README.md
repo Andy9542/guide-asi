@@ -111,24 +111,28 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 адаптера обвязка исключить не может.
 
 Значения — тоже часть профиля: значение проверки обязано быть статической строкой (у
-`*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением), значение
-переменной — статическим скаляром. Префиксы `file://`, `package:`, `python:`, `javascript:`
-и `js:` `preflight.py` отклоняет: в 0.123.0 `value: file://check.py` у разрешённого
+`*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением),
+значение переменной — статическим скаляром. Префиксы `file://`, `package:`, `python:`,
+`javascript:` и `js:` `preflight.py` отклоняет: `value: file://check.py` у разрешённого
 `contains` грузит файл и зовёт из него функцию, а её исключение приходит компонентом
 `pass: false` без `metadata.graderError`. Мы замерили это полным `run.sh` по конфигам
-`testdata/dynamic-value.yaml` и `testdata/scoring-function.yaml`, заменив путь к функции на
-абсолютный. В файлах путь относительный, а прогон идёт по копии конфига во временном
-каталоге, где соседнего файла нет: до правки promptfoo пытался исполнить функцию по этому
-пути, получал FileNotFoundError и тем же агрегатом давал код 0. С абсолютным путём первый
-конфиг давал код 0 и `REDTEAM_VERDICT=pass` с причиной «Aggregate score 0.50 ≥ 0.5
-threshold» (порог зачёл сорвавшуюся проверку наравне с состоявшейся), а без порога код 1, то
-есть обвинение модели в сбое чужого кода; второй давал код 1 и FAIL с причиной «Scoring
-function error: …». Теперь `preflight.py` отклоняет оба до запуска promptfoo.
-`package:<модуль>:<экспорт>` в 0.123.0 у того же `contains` грузит модуль, зовёт из него
-экспорт и сравнивает ответ с тем, что экспорт вернул: с абсолютным путём к
-`testdata/package-helper.mjs` прогон давал код 0 и `REDTEAM_VERDICT=pass` при
-`metadata.renderedAssertionValue = "refuse"`, то есть значение проверки пришло из чужого
-кода (контрпример аудита 24.09.2026, `testdata/package-value.yaml`).
+`testdata/dynamic-value.yaml` и `testdata/scoring-function.yaml`, заменив путь к функции
+на абсолютный. В файлах путь относительный, а прогон идёт по копии конфига во временном
+каталоге, где соседнего файла нет: до правки promptfoo пытался исполнить функцию по
+этому пути, получал FileNotFoundError и тем же агрегатом давал код 0. С абсолютным путём
+первый конфиг давал код 0 и `REDTEAM_VERDICT=pass` с причиной «Aggregate score 0.50 ≥
+0.5 threshold» (порог зачёл сорвавшуюся проверку наравне с состоявшейся), а без порога
+код 1, то есть обвинение модели в сбое чужого кода; второй давал код 1 и FAIL с
+причиной «Scoring function error: …». Теперь `preflight.py` отклоняет оба до запуска
+promptfoo.
+
+`package:<модуль>:<экспорт>` в 0.123.0 у того же `contains` грузит модуль и зовёт из
+него экспорт: с абсолютным путём к модулю прогон давал код 0 и `REDTEAM_VERDICT=pass`
+при `metadata.renderedAssertionValue = "refuse"`, то есть значение проверки пришло из
+чужого кода; у переменной `package:` так же грузит модуль и подставляет то, что вернул
+экспорт (контрпример аудита 24.09.2026, `testdata/package-value.yaml`). Относительный
+путь promptfoo ищет от каталога копии конфига и модуля не находит — для ручного
+воспроизведения нужен абсолютный путь к `testdata/package-helper.mjs`.
 
 **Типы проверок.** `preflight.py` принимает только типы с проверенным контрактом ошибок:
 `contains`, `icontains`, `not-contains`, `not-icontains`, `equals`, `starts-with`,
@@ -162,13 +166,12 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 профиля (`SUPPORTED_ASSERT_TYPES` и `dynamic_prefix` объявлены в `classify.py`,
 `preflight.py` их импортирует, `preflight_test.py` проверяет тождество). Компонент без
 `assertion` (так приходит группа `assert-set`) или с типом вне профиля вердикта не даёт.
-Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`, `transform`,
-`options.transform`, `provider`, `providerOutput` или значение проверки с динамическим
-префиксом, включая `package:` (в 0.123.0 он грузит модуль и зовёт из него экспорт;
-контрпример аудита 24.09.2026, `testdata/package-value.yaml`). Полной формы экспорта вторая
-линия не знает: в 0.123.0 `transform` и значение проверки в `testCase` видны, а
-`assertScoringFunction` остаётся только в `config.tests`; состав наследуемых полей меняется
-с версией, и линия держится за то, чего в пробе быть не должно.
+Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`,
+`transform`, `options.transform`, `provider`, `providerOutput` или значение проверки с
+динамическим префиксом. Полной формы экспорта вторая линия не знает: в 0.123.0
+`transform` и значение проверки в `testCase` видны, а `assertScoringFunction` остаётся
+только в `config.tests`; состав наследуемых полей меняется с версией, и линия держится за
+то, чего в пробе быть не должно.
 
 `regex` и `not-regex` тоже вне профиля: некорректный шаблон в 0.123.0 приходит
 компонентом `pass: false` с причиной «Invalid regex pattern: …» без
