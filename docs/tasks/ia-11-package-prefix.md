@@ -34,3 +34,20 @@ TDD: yes.
 - 1.3 `testdata/package-value.yaml` (конфиг аудита; путь модуля может быть относительным — отказ до загрузки) и `testdata/package-helper.mjs` (`value`, `crash`) для ручного воспроизведения с абсолютным путём; `selftest.sh`: `rejected_before_run package-value 'package:' …`, контроль со статическим значением → 0.
 - 1.4 README: список префиксов в «Профиле пробы» и второй линии; числа по факту.
 - Commit: `fix(redteam): reject the package: prefix with the other executable prefixes`
+
+## Verify
+
+Воспроизведение на базе `2dddc8f` (копия, настоящий `run.sh`): абсолютный путь к модулю → 0 PASS, `metadata.renderedAssertionValue = "refuse"`, preflight базы принимает конфиг; экспорт с исключением → 3 INFRA, маркер исключения в стеке; относительный путь → INFRA «Package not found» (promptfoo ищет модуль от каталога копии конфига); `PACKAGE:` и ведущий пробел → 1 FAIL (для promptfoo обычная строка: `isPackagePath` — `startsWith("package:")` без lower/trim, `packageParser`). Наблюдения: `scratchpad/ia11/`.
+
+Три проверяющих и ревьюер на `19c96cc`: 50 проверок, все pass, 0 ИНФРА по делу. Наблюдения: `scratchpad/verify7/`.
+
+- **IV1.** Конфиг аудита с абсолютным путём и экспорт с исключением → 3 до promptfoo одной строкой «tests[0].assert[0].value начинается с package: …», без «Writing output to», выгрузки нет, маркер исключения нигде не появляется; фикстура `testdata/package-value.yaml` → 3; контроль со статическим значением → 0 PASS, `assertion.value = "refuse"`, `renderedAssertionValue` отсутствует. Вторая линия на настоящей выгрузке базы с манифестом базы → 3 «assert[0].value в testCase начинается с package:»; контроль → 0. `package:` в `vars`, в элементе списка, в `defaultTest.assert`, у `llm-rubric`, в `prompts[0]` → 3; `PACKAGE:` → 3 (шире promptfoo, docstring `dynamic_prefix`); ведущий пробел → 1 FAIL, как на базе.
+- **IV2.** `promptfooconfig.yaml` (3 пробы), `echo-*.yaml`, `provider-transform.yaml`, `dynamic-value.yaml`, `scoring-function.yaml` — прежние исходы; `preflight_test` 79/0 (число случаев равно числу прогнанных после 7bf45d4), `classify_test` 57/0; `selftest.sh` → 0, 51 ok; sed-контроль меняет одну строку; `sh -n`, башизмы, `check_links` чисты; диф только в `configs/redteam/` и task-файле, трейлеры на месте, пины не менялись.
+- **Противник.** Шаблон `{{p}}` с `package:` в vars отклоняется preflight по vars; дубль ключа `value` — PyYAML берёт последний, js-yaml бросает «duplicated mapping key» → INFRA, модуль не грузится; `providers: ["package:…:Export"]` proходит preflight и promptfoo грузит модуль — исход INFRA (провайдер упал), известное отложенное «любой один провайдер», не IA-11. Обходов с ложным PASS нет.
+- **Не взято.** `prompts[0]` с `package:` отклоняется общей строкой про промпт без имени префикса (косметика); ведущий пробел перед `package:` обе стороны читают одинаково — граница держится пином 0.123.0; `README`/шапка фикстуры говорят об абсолютном пути к `testdata/package-helper.mjs`, замер шёл на копии с тем же кодом.
+
+### Review
+
+up:reviewer по `2dddc8f..19c96cc`: находок ≥ 80 нет, merge-ready. Проверено: `dynamic_prefix` на всех четырёх точках preflight и во второй линии; sed-контроль; счётчик; README без дублей смысла; `.mjs` в `testdata` не подхватывается `syntax_check` и `check_links`; PC1.
+
+**Deviations:** сверх плана — счётчик `preflight_test` печатал на один случай больше прогнанного (7bf45d4; README по факту), шапка фикстуры и docstring `dynamic_prefix` дополнены замерами базы (9cca4f4).
