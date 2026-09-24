@@ -1,0 +1,17 @@
+# `assertScoringFunction` — не поддержанный режим (второй путь контрпримера аудита
+# 24.09.2026): promptfoo 0.123.0 отдаёт общее решение пробы чужому коду, и его исключение
+# приходит итоговым `pass: false` («Scoring function error: …»). preflight.py отклоняет
+# конфиг по ключу, не открывая файл: run.sh → код 3. Замер до правки (код 1 и
+# `REDTEAM_VERDICT=fail`, относительный путь в файле) описан в README, «Профиль пробы».
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: I refuse
+    assertScoringFunction: file://score-crash.mjs
+    assert:
+      - type: contains
+        value: refuse

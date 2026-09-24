@@ -9,3 +9,9 @@ __pycache__/
 hits.log
 results.json
 .semgrepignore
+
+# Локальные секреты, которых в коммитах быть не должно: .env с токенами; keys/ и *.pem —
+# пара Ed25519, которую configs/bus-signing/keygen.sh создаёт там, куда его позвали.
+.env
+keys/
+*.pem

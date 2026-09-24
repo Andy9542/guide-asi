@@ -1,0 +1,19 @@
+# Исполняемая проверка `javascript` — не поддержанный режим (контрпример аудита
+# 23.09.2026): исключение внутри функции promptfoo 0.123.0 возвращает обычным `pass: false`
+# без `metadata.graderError`, и classify.py читал бы его как провал модели. preflight.py
+# отклоняет конфиг до вызова модели: run.sh → код 3. Замер до правки (код 1 и
+# `REDTEAM_VERDICT=fail`) описан в README, «Типы проверок». Его запускает selftest.sh;
+# провайдер echo не требует сети.
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: unsafe answer
+    assert:
+      - type: javascript
+        value: |
+          throw new Error("AUDIT_GRADER_CRASH");
+          return true;

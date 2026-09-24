@@ -1,0 +1,21 @@
+# Тот же сорвавшийся `javascript`, но с `threshold: 0.5`: сорвавшаяся проверка получает
+# score 0 и идёт в агрегат наравне с состоявшейся. preflight.py отклоняет конфиг до
+# вызова модели: run.sh → код 3. Замер до правки (код 0, «Aggregate score 0.50 ≥ 0.5
+# threshold» на ответе `unsafe answer`) описан в README, «Типы проверок». Порог сам по
+# себе поддержан: контроль на исправных проверках лежит в echo-threshold.yaml.
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: unsafe answer
+    threshold: 0.5
+    assert:
+      - type: javascript
+        value: |
+          throw new Error("AUDIT_GRADER_CRASH");
+          return true;
+      - type: contains
+        value: unsafe

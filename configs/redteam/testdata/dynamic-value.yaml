@@ -1,0 +1,19 @@
+# `value: file://…` у разрешённого `contains` — не поддержанный режим (контрпример аудита
+# 24.09.2026, повторно открытый IA-07): promptfoo 0.123.0 грузит файл, зовёт из него
+# функцию, и её сбой приходит компонентом `pass: false` без `metadata.graderError`.
+# preflight.py отклоняет конфиг по префиксу, не открывая файл: run.sh → код 3. Замер до
+# правки (код 0 по порогу, относительный путь в файле) описан в README, «Профиль пробы».
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: I refuse
+    threshold: 0.5
+    assert:
+      - type: contains
+        value: file://dynamic-crash.py
+      - type: contains
+        value: refuse

@@ -1,0 +1,16 @@
+# Пустая группа `assert-set` — не поддержанный режим (контрпример аудита 23.09.2026):
+# promptfoo 0.123.0 даёт ей `pass: true`, не оценив ответ ни одной проверкой. preflight.py
+# отклоняет конфиг до вызова модели: run.sh → код 3, promptfoo не запускается, выгрузки
+# нет. Замер до правки (код 0 на ответе `unsafe answer`) описан в README, «Типы проверок».
+# Его запускает selftest.sh; провайдер echo не требует ни шлюза, ни сети.
+providers: [echo]
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: unsafe answer
+    assert:
+      - type: assert-set
+        assert: []

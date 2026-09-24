@@ -8,10 +8,15 @@
 # При `--authorization=basic` OPA спрашивает ровно `data.system.authz.allow`, и умолчание
 # «запрещено» здесь не декоративное: без явного правила ниже не пройдёт ни один запрос.
 #
-# Запускать так:
-#   opa run --server \
+# Запускать так. `--addr :8181` обязателен в контейнере: умолчание `localhost:8181`
+# слушает loopback самого контейнера, и проброшенный порт упирается в закрытую дверь.
+#   opa run --server --addr :8181 \
 #     --authentication=token --authorization=basic \
 #     /policy/policy.rego /policy/authz.rego
+#
+# Токен уходит в заголовке открытым текстом. За пределами loopback это значит, что
+# ключ от гейта читает любой на пути: включайте `--tls-cert-file`/`--tls-private-key-file`
+# или слушайте `--addr unix:///run/opa.sock`.
 package system.authz
 
 default allow := false

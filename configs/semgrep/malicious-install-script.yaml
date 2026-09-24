@@ -12,32 +12,227 @@ rules:
   # где заголовок лежит во вложенном `headers: {...}`. Форма нагрузки — не то, на что
   # можно опираться: злоумышленник соберёт объект как угодно. Опираться надо на путь
   # значения от источника к стоку.
+  #
+  # Вторая та же ошибка, уже на стороне ИСТОЧНИКА: `process.env.$VAR` — тоже форма.
+  # Ревью показало, что правило проходило мимо `process.env["CI_JOB_TOKEN"]`,
+  # мимо `const { NPM_TOKEN } = process.env` и мимо псевдонима `const env = process.env`,
+  # а сток `$HTTP.put(...)` ловил `store.put(token)` без единого сетевого вызова.
+  # Поэтому источник перечислен четырьмя формами обращения к окружению, а сток сужен
+  # до известных сетевых модулей и дочернего процесса — см. testdata/.
   - id: install-script-ci-token-exfil
     mode: taint
     languages: [javascript]
     severity: ERROR
     message: >
       Установочный скрипт берёт токен сервисной учётки из окружения и передаёт его
-      в сетевой вызов. Это кража идентичности в цепочке поставок (OWASP ASI04) —
-      зависимость нужно отклонить.
+      в сетевой вызов или в дочерний процесс. Это кража идентичности в цепочке
+      поставок (OWASP ASI04) — зависимость нужно отклонить.
     metadata:
       owasp: ASI04
       references:
         - https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
     pattern-sources:
+      # Прямое обращение: свойством и скобочной нотацией.
       - patterns:
-          - pattern: process.env.$VAR
+          - pattern-either:
+              - pattern: process.env.$VAR
+              - pattern: process.env["$VAR"]
           - metavariable-regex:
               metavariable: $VAR
               regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
-    pattern-sinks:
+      # Псевдоним: окружение сохранено в переменную, обращение идёт через неё.
+      - patterns:
+          - pattern-inside: |
+              $ENV = process.env
+              ...
+          - pattern-either:
+              - pattern: $ENV.$VAR
+              - pattern: $ENV["$VAR"]
+          - metavariable-regex:
+              metavariable: $VAR
+              regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
+      # Деструктуризация: process.env рядом с обращением не стоит вообще.
       - patterns:
           - pattern-either:
-              - pattern: $HTTP.request(...)
-              - pattern: $HTTP.get(...)
-              - pattern: $HTTP.post(...)
-              - pattern: $HTTP.put(...)
-              - pattern: fetch(...)
+              - pattern-inside: |
+                  const {..., $VAR, ...} = process.env
+                  ...
+              - pattern-inside: |
+                  let {..., $VAR, ...} = process.env
+                  ...
+              - pattern-inside: |
+                  var {..., $VAR, ...} = process.env
+                  ...
+          - pattern: $VAR
+          - metavariable-regex:
+              metavariable: $VAR
+              regex: (?i).*(token|secret|password|passwd|api_?key|credential|private_?key).*
+      # Окружение целиком: имени секрета в коде нет, а утекает оно всё.
+      - pattern: JSON.stringify(process.env)
+    pattern-sinks:
+      # Semgrep 1.176.1 разрешает имена импортов: regex на $HTTP проходит, если подходит
+      # ЛИБО имя переменной, ЛИБО строка модуля за ней. Поэтому `const c = require('https');
+      # c.get(...)` ловит уже эта ветка. Формы вызова перечислены явно: `c?.get`, `c['get']`,
+      # `c.get.call/apply/bind` — тот же сток, а без перечисления они проходили мимо.
+      # Метод известного сетевого модуля (или дочернего процесса под своим именем).
+      - patterns:
+          - pattern-either:
+              - pattern: $HTTP.$METHOD(...)
+              - pattern: $HTTP?.$METHOD(...)
+              - pattern: $HTTP[$METHOD](...)
+              - pattern: $HTTP.$METHOD.call(...)
+              - pattern: $HTTP.$METHOD.apply(...)
+              - pattern: $HTTP.$METHOD.bind(...)(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|child_process)$
+      # Клиент, который вызывается функцией: axios({url, headers}).
+      - patterns:
+          - pattern: $HTTP(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(axios|got|undici|superagent|request|needle|ky|node-fetch)$
+      # Без промежуточной переменной: require('https').get(...).
+      - patterns:
+          - pattern: require('$MOD').$METHOD(...)
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch|child_process)$
+      - pattern: fetch(...)
+      # Тело пишется в объект запроса после его создания. Веток две, потому что
+      # metavariable-regex сверяет ТЕКСТ метапеременной: у `https.request(...)` это
+      # `https`, а у `require('https').request(...)` — целиком `require('https')`,
+      # и одним выражением оба случая не описать. Без сужения источника запроса сюда
+      # попадал любой локальный объект с методом `request` — см. testdata/benign/store-request.js.
+      # В regex нет `request`: у одноимённого пакета нет метода .request, а разрешение имён
+      # превращало `const { request } = require('./store')` в ложную находку.
+      - patterns:
+          - pattern-inside: |
+              $REQ = $HTTP.request(...)
+              ...
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(node:)?(https?|axios|got|undici|superagent|needle|ky|net|tls)$
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      - patterns:
+          - pattern-inside: |
+              $REQ = require('$MOD').request(...)
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|needle|ky|net|tls)$
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      # Тот же запрос, но без переменной: https.request(opts).end(token).
+      - patterns:
+          - pattern-either:
+              - pattern: $HTTP.request(...).write(...)
+              - pattern: $HTTP.request(...).end(...)
+          - metavariable-regex:
+              metavariable: $HTTP
+              regex: ^(node:)?(https?|axios|got|undici|superagent|needle|ky|net|tls)$
+      # Модуль, подключённый в переменную, по СТРОКЕ require, а не по имени: закрывает
+      # `node:`-префикс, шаблонную строку в require, отложенное присваивание `let c; c = …`
+      # и вызов функцией для node-fetch. Regex на $MOD, имя переменной свободно.
+      - patterns:
+          - pattern-inside: |
+              $HTTP = require('$MOD')
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch)$
+          - pattern-either:
+              - pattern: $HTTP.$METHOD(...)
+              - pattern: $HTTP?.$METHOD(...)
+              - pattern: $HTTP[$METHOD](...)
+              - pattern: $HTTP.$METHOD.call(...)
+              - pattern: $HTTP.$METHOD.apply(...)
+              - pattern: $HTTP.$METHOD.bind(...)(...)
+              - pattern: Reflect.apply($HTTP.$METHOD, ...)
+              - pattern: $HTTP(...)
+              - pattern: $HTTP.request(...).write(...)
+              - pattern: $HTTP.request(...).end(...)
+      - patterns:
+          - pattern-inside: |
+              $HTTP = require('$MOD')
+              ...
+          - pattern-inside: |
+              $REQ = $HTTP.request(...)
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch)$
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      # Переприсваивание на один уровень: const a = require('https'); const b = a; b.get(...).
+      # Два уровня (const d = b) — граница, см. README.
+      - patterns:
+          - pattern-inside: |
+              $HTTP = require('$MOD')
+              ...
+          - pattern-inside: |
+              $ALIAS = $HTTP
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch)$
+          - pattern-either:
+              - pattern: $ALIAS.$METHOD(...)
+              - pattern: $ALIAS?.$METHOD(...)
+              - pattern: $ALIAS[$METHOD](...)
+              - pattern: $ALIAS(...)
+              - pattern: $ALIAS.request(...).write(...)
+              - pattern: $ALIAS.request(...).end(...)
+      - patterns:
+          - pattern-inside: |
+              $HTTP = require('$MOD')
+              ...
+          - pattern-inside: |
+              $ALIAS = $HTTP
+              ...
+          - pattern-inside: |
+              $REQ = $ALIAS.request(...)
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch)$
+          - pattern-either:
+              - pattern: $REQ.write(...)
+              - pattern: $REQ.end(...)
+      # Псевдоним метода: const g = c.get; g(url + token). Тот же шаблон закрывает
+      # `const run = cp.execSync; run(...)`, поэтому child_process тоже в списке.
+      - patterns:
+          - pattern-inside: |
+              $HTTP = require('$MOD')
+              ...
+          - pattern-inside: |
+              $FN = $HTTP.$METHOD
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?(https?|axios|got|undici|superagent|request|needle|ky|net|tls|node-fetch|child_process)$
+          - pattern: $FN(...)
+      # Дочерний процесс через модуль, подключённый в переменную.
+      - patterns:
+          - pattern-inside: |
+              $CP = require('$MOD')
+              ...
+          - metavariable-regex:
+              metavariable: $MOD
+              regex: ^(node:)?child_process$
+          - pattern: $CP.$FN(...)
+      # Дочерний процесс, вынутый из модуля деструктуризацией: сток по имени функции.
+      - pattern-either:
+          - pattern: exec(...)
+          - pattern: execSync(...)
+          - pattern: execFile(...)
+          - pattern: execFileSync(...)
+          - pattern: spawn(...)
+          - pattern: spawnSync(...)
 
   # Отдельное правило и намеренно WARNING: сетевой вызов на этапе install подозрителен
   # сам по себе, но это ещё не кража. Смотреть глазами, не блокировать автоматом.
@@ -54,11 +249,30 @@ rules:
     patterns:
       - pattern-either:
           - pattern: fetch(...)
+          # request отдельно от get/post: пакет `request` в regex нужен только для
+          # `request.get/post`, а с ним `const { request } = require('./store')` давал
+          # ложную находку через разрешение имён.
+          - patterns:
+              - pattern: $HTTP.request(...)
+              - metavariable-regex:
+                  metavariable: $HTTP
+                  regex: ^(node:)?(https?|axios|got|superagent|node_fetch)$
           - patterns:
               - pattern-either:
-                  - pattern: $HTTP.request(...)
                   - pattern: $HTTP.get(...)
                   - pattern: $HTTP.post(...)
               - metavariable-regex:
                   metavariable: $HTTP
-                  regex: ^(https?|axios|request|got|superagent|node_fetch)$
+                  regex: ^(node:)?(https?|axios|request|got|superagent|node_fetch)$
+          # Модуль в переменной с любым именем — см. ту же ветку у правила про токен.
+          - patterns:
+              - pattern-inside: |
+                  $HTTP = require('$MOD')
+                  ...
+              - metavariable-regex:
+                  metavariable: $MOD
+                  regex: ^(node:)?(https?|axios|request|got|superagent|node-fetch)$
+              - pattern-either:
+                  - pattern: $HTTP.request(...)
+                  - pattern: $HTTP.get(...)
+                  - pattern: $HTTP.post(...)
