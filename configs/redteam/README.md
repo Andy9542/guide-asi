@@ -23,7 +23,7 @@ selftest не выполняет.
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
 python3 classify_test.py        # классификатор на 56 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 71 случай: что допускается к прогону и что отклоняется
+python3 preflight_test.py       # 73 случая: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -95,10 +95,11 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 в `classify.py`: строка выгрузки, у которой `providerOutput` есть в `testCase`, вердикта
 не получает.
 
-**Профиль пробы.** Поддержанный режим перечислен ключами, а не запретами: проба —
-`vars`, `assert`, `threshold`, `description`; `defaultTest` — `vars`, `assert` и `options`
-с единственным ключом `provider` (судья); проверка — `type`, `value`, `weight` (число),
-`metric` (строка). Любой другой ключ отклоняется до запуска. Список запретов пришлось бы
+**Профиль пробы.** Поддержанный режим перечислен ключами, а не запретами: корень —
+`providers`, `prompts`, `tests`, `defaultTest`, `evaluateOptions` (только `repeat`, и тот
+равен единице); проба — `vars`, `assert`, `threshold`, `description`; `defaultTest` —
+`vars`, `assert` и `options` с единственным ключом `provider` (судья); проверка — `type`,
+`value`, `weight` (число), `metric` (строка). Любой другой ключ отклоняется до запуска. Список запретов пришлось бы
 пополнять по одному полю за отчёт аудита: `assertScoringFunction` отдаёт общее решение
 пробы чужой функции, а `transform` переписывает ответ модели до проверок.
 
@@ -144,8 +145,8 @@ promptfoo.
 а звать её незачем.
 
 Вторая линия — в `classify.py`: компонент обязан нести `assertion.type` из того же
-профиля (константы `SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` есть в обоих файлах,
-равенство копий проверяет `preflight_test.py`). Компонент без `assertion` — так приходит
+профиля (`SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` живут в `classify.py`, `preflight.py`
+их импортирует — источник один, `preflight_test.py` проверяет тождество). Компонент без `assertion` — так приходит
 группа `assert-set` — или с типом вне профиля вердикта не даёт. Вердикта не даёт и
 строка, у которой в `testCase` есть `assertScoringFunction`, `transform`,
 `options.transform`, `provider`, `providerOutput` или значение проверки с динамическим
@@ -167,8 +168,8 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 33 сошедшихся строки: `classify_test.py` → «расхождений 0» на 56
-выгрузках; `preflight_test.py` → «расхождений 0» на 71 случае; `sh -n` на `run.sh` и
+прогретом кэше npx), 41 сошедшаяся строка: `classify_test.py` → «расхождений 0» на 56
+выгрузках; `preflight_test.py` → «расхождений 0» на 73 случаях; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
@@ -233,9 +234,8 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 как оно сообщает о сбое СВОЕГО выполнения. Ни `assert-set`, ни `javascript`, ни `python`,
 ни динамические значения, ни `assertScoringFunction` в гайде не используются;
 понадобятся — сначала проверьте контракт их ошибок на своей версии promptfoo, потом
-расширяйте перечни в `preflight.py` (`SUPPORTED_ASSERT_TYPES`, `SUPPORTED_TEST_KEYS`,
-`SUPPORTED_DEFAULT_TEST_KEYS`, `SUPPORTED_OPTION_KEYS`, `SUPPORTED_ASSERT_KEYS`,
-`DYNAMIC_PREFIXES`) и копии в `classify.py`. Для динамических проверок одного перечня
+расширяйте схемы `*_PROFILE` в `preflight.py`, `SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES`
+в `classify.py` (оттуда их берут обе линии) и `TESTCASE_KEYS` второй линии. Для динамических проверок одного перечня
 мало: нужен структурированный статус их выполнения, которого в выгрузке 0.123.0 нет.
 
 Набор проб измеряет **модель**, а не систему. Агент может безупречно отказываться от всех

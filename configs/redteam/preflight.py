@@ -28,32 +28,13 @@ tests, без повторов и списков в vars. Всё перечис�
 списком 0..N-1 — для такой матрицы нужна отдельная реализация ожиданий. Отдельный
 судья в `defaultTest.options.provider` разрешён: он не цель прогона.
 
-Проверки пробы ограничены профилем: детерминированные сравнения без пути исполнения
-(contains, icontains, not-contains, not-icontains, equals, starts-with, contains-any,
-contains-all, icontains-any, icontains-all, is-json) и судья llm-rubric. Группа
-`assert-set`, исполняемые типы (javascript, python), regex/not-regex и незнакомые
-отклоняются ДО запуска: пустая группа в 0.123.0 даёт компонент с `pass: true` без единой
-проверки ответа, а сбой исполняемой проверки и некорректный шаблон regex приходят как
-обычный `pass: false` без `metadata.graderError` — от отрицательного решения о модели их
-не отличить. Проба, у которой после слияния с defaultTest не осталось ни одной проверки,
-отклоняется там же: promptfoo вернул бы «No assertions», и звать модель незачем.
-`threshold` разрешён — агрегирование ИСПРАВНЫХ проверок поддержано.
-
-Профиль задан перечнем ключей, а не типом проверки: разрешённый тип не отвечает за то,
-как проверка выполняется. Проба — `vars`, `assert`, `threshold`, `description`;
-`defaultTest` — `vars`, `assert`, `options` с единственным ключом `provider` (судья);
-проверка — `type`, `value`, `weight`, `metric`. Значение проверки обязано быть статической
-строкой (у `*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением
-или ничем), значение переменной — статическим скаляром: за префиксом `file://` promptfoo
-0.123.0 грузит файл и ЗОВЁТ функцию из него даже у разрешённого `contains`, а её исключение
-приходит компонентом `pass: false` без `graderError`. Ключ вне перечня
-(`assertScoringFunction`, `transform`, `metadata`, …) — отказ до запуска: поддержанный режим
-перечислен целиком, иначе каждое новое поле promptfoo пришлось бы запрещать по одному,
-узнав о нём из отчёта аудита.
-
-Готовый ответ в пробе (`providerOutput`) не принимается: promptfoo подставляет его
-вместо вызова провайдера, и «набор выполнен, все проверки прошли» приходит из конфига,
-а не от цели. Поймать это по выгрузке нечем — ответ не кэшированный.
+Поддержанный режим перечислен целиком, а не списком запретов: схемы `*_PROFILE` ниже
+задают ключи корня, пробы, `defaultTest`, `options` и проверки, `SUPPORTED_ASSERT_TYPES`
+(из classify.py, единый источник) — типы проверок, `DYNAMIC_PREFIXES` — префиксы, за
+которыми promptfoo взял бы значение не из конфига. Всё вне схем — отказ до запуска с
+причиной; известные из отчётов аудита ключи (`provider`, `providerOutput`,
+`assertScoringFunction`, `transform`, `scenarios`, …) получают адресную причину из
+`KEY_REASONS`. Почему каждый запрет нужен, рассказано в README («Профиль пробы»).
 
 Ключей доступа манифест не содержит: в него попадают только vars, assert, идентичность
 провайдера и текст промпта.
@@ -71,69 +52,40 @@ except ImportError:
                      "или venv); конфиг не разобран\n")
     raise SystemExit(3)
 
-# Ключи, которые меняют состав набора или пишут файлы мимо -o.
-UNSUPPORTED_KEYS = ("scenarios", "extensions", "outputPath")
+# Профиль типов проверок и динамические префиксы живут в classify.py (вторая линия по
+# выгрузке, без PyYAML) — здесь только импорт, чтобы у обеих линий был один источник.
+from classify import SUPPORTED_ASSERT_TYPES, dynamic_prefix  # noqa: E402
 
-# Ключи пробы, которые promptfoo понимает, а поддержанный режим не принимает. Запрет один
-# на defaultTest и на tests[]: в 0.123.0 пробе наследуются vars, assert и options, но
-# состав наследуемого — свойство версии, а не контракт, и два списка запретов разъедутся.
-UNSUPPORTED_TEST_KEYS = {
+# Причины для ключей вне схем, которые уже приходили из отчётов аудита: отказ называет
+# подделанный вердикт, а не только чужой ключ.
+KEY_REASONS = {
     "provider": "переопределяет цель — прогон пойдёт не по проверенному провайдеру",
     "providerOutput": "подставляет готовый ответ вместо вызова модели — прогон не измеряет "
                       "цель, а перечитывает конфиг",
+    "assertScoringFunction": "отдаёт общее решение пробы чужому коду",
+    "transform": "переписывает ответ модели до проверок",
+    "scenarios": "меняет состав набора",
+    "extensions": "исполняет чужие хуки",
+    "outputPath": "пишет файлы мимо -o",
 }
-
-# Профиль проверок: типы, у которых в 0.123.0 нет пути исполнения пользовательского кода
-# и чей отказ отличим от отрицательного решения о модели. Сверено живым прогоном на
-# echo: каждая такая проверка возвращает компонент с `assertion.type`, булевым `pass` и
-# причиной, исключений не бросает; отказ судьи llm-rubric приходит как
-# `metadata.graderError`. Копия профиля — в classify.py (вторая линия, по выгрузке);
-# равенство копий проверяет preflight_test.py. Новый тип добавляется в профиль только
-# вместе с проверкой того, как он сообщает о сбое своего выполнения.
-SUPPORTED_ASSERT_TYPES = frozenset({
-    "contains", "icontains", "not-contains", "not-icontains", "equals", "starts-with",
-    "contains-any", "contains-all", "icontains-any", "icontains-all", "is-json",
-    "llm-rubric",
-})
-
-# Профиль пробы: ключи, которые поддержанный режим принимает. Перечень, а не список
-# запретов, — promptfoo понимает десятки полей пробы, и за любым из них может стоять
-# чужой код (`assertScoringFunction`) или подмена ответа (`transform`).
-SUPPORTED_TEST_KEYS = frozenset({"vars", "assert", "threshold", "description"})
-SUPPORTED_DEFAULT_TEST_KEYS = frozenset({"vars", "assert", "options"})
-SUPPORTED_OPTION_KEYS = frozenset({"provider"})            # судья, и только он
-SUPPORTED_ASSERT_KEYS = frozenset({"type", "value", "weight", "metric"})
 
 # Типы профиля, которые сравнивают ответ со списком строк; остальные — с одной строкой.
 LIST_VALUE_TYPES = frozenset({"contains-any", "contains-all",
                               "icontains-any", "icontains-all"})
 
-# Префиксы, за которыми promptfoo берёт значение не из конфига. `file://` у значения
-# проверки в 0.123.0 грузит .py/.js и ЗОВЁТ функцию из него — даже у разрешённого
-# `contains`; исключение такой функции приходит компонентом `pass: false` без
-# `graderError` (контрпример аудита 24.09.2026). `python:`, `javascript:` и `js:` у value
-# в 0.123.0 не действуют, но отклоняются заранее: запретить дешевле, чем следить за тем,
-# когда очередная версия их включит. Копия — в classify.py (вторая линия, по выгрузке);
-# равенство копий проверяет preflight_test.py.
-DYNAMIC_PREFIXES = ("file://", "python:", "javascript:", "js:")
-
-EXECUTABLE_REASON = ("исполняемая проверка {kind} не поддержана: её сбой приходит как "
-                     "pass: false без graderError и от отрицательного решения о модели "
-                     "не отличим")
-
-# Типы вне профиля, у которых причина отказа своя: называть её поимённо полезнее, чем
-# «тип не поддержан» — по ней видно, какой именно вердикт был бы подделан.
+# Типы вне профиля, у которых причина отказа своя: по ней видно, какой вердикт был бы
+# подделан. Сбой исполняемой проверки и некорректный шаблон regex приходят в 0.123.0
+# компонентом pass: false без graderError — от отрицательного решения о модели их не
+# отличить; пустая группа assert-set даёт pass без единой проверки ответа.
 REJECTED_ASSERT_REASONS = {
-    "assert-set": "группа assert-set не поддержана: пустая группа даёт pass без единой "
-                  "проверки ответа (в 0.123.0 componentResults пуст, assertionCount 0)",
-    "javascript": EXECUTABLE_REASON.format(kind="javascript"),
-    "python": EXECUTABLE_REASON.format(kind="python"),
-    # Некорректный шаблон в 0.123.0 приходит не исключением, а компонентом pass: false
-    # «Invalid regex pattern: …» без graderError: ошибка конфига стала бы провалом модели.
-    "regex": "regex не поддержан: некорректный шаблон приходит как pass: false без "
-             "graderError, и ошибка конфига читалась бы как провал модели",
-    "not-regex": "not-regex не поддержан: некорректный шаблон приходит как pass: false без "
-                 "graderError, и ошибка конфига читалась бы как провал модели",
+    "assert-set": "пустая группа даёт pass без единой проверки ответа (в 0.123.0 "
+                  "componentResults пуст, assertionCount 0)",
+    **dict.fromkeys(("javascript", "python"),
+                    "сбой исполняемой проверки приходит как pass: false без graderError и от "
+                    "отрицательного решения о модели не отличим"),
+    **dict.fromkeys(("regex", "not-regex"),
+                    "некорректный шаблон приходит как pass: false без graderError, и ошибка "
+                    "конфига читалась бы как провал модели"),
 }
 
 # Плоский (без кавычек) скаляр читается по-разному YAML 1.1 (PyYAML, здесь) и YAML 1.2
@@ -222,12 +174,6 @@ def provider_identity(provider):
                       f"({type(provider).__name__})")
 
 
-def dynamic_prefix(text):
-    """Префикс, по которому promptfoo возьмёт значение не из конфига, или None."""
-    lowered = text.lower()
-    return next((prefix for prefix in DYNAMIC_PREFIXES if lowered.startswith(prefix)), None)
-
-
 def text_problem(value, where):
     """Почему значение не строка, или None."""
     if not isinstance(value, str):
@@ -254,36 +200,56 @@ def static_problem(value, where):
     return None
 
 
-# Необязательные поля с их типом: у проверки — weight и metric, у пробы — threshold и
-# description. Где какое поле уместно, решают перечни ключей профиля.
-# Один словарь на поля проверки (weight, metric) и пробы (threshold, description):
-# коллизий имён нет, потому что reject_foreign_keys() уже сузил каждую секцию до её
-# собственных ключей — порядок вызовов здесь несущий.
-FIELD_TYPES = {"weight": number_problem, "threshold": number_problem,
-               "metric": text_problem, "description": text_problem}
+def section_problem(section, profile, where, what):
+    """Почему секция вне схемы, или None: сначала чужие ключи, потом типы своих полей.
 
-
-def field_problem(section, where):
-    """Почему необязательное поле секции не того типа, или None."""
-    for key, check in FIELD_TYPES.items():
-        if key in section:
+    Схема — словарь «ключ → проверка значения или None»; один вызов на корень конфига,
+    пробу, defaultTest, options и проверку, чтобы правило «перечислено целиком» жило в
+    одном месте, а не в шести функциях.
+    """
+    extra = sorted(set(section) - set(profile))
+    if extra:
+        named = [f"{key} {KEY_REASONS[key]}" if key in KEY_REASONS else key for key in extra]
+        return (f"{where}: ключи вне профиля {what} ({', '.join(named)}) — поддержанный "
+                "режим перечислен целиком, и что делает чужой ключ, не проверено")
+    for key, check in profile.items():
+        if check is not None and key in section:
             why = check(section[key], f"{where}.{key}")
             if why:
                 return why
     return None
 
 
-def foreign_keys(section, allowed):
-    """Ключи секции вне перечня профиля, через запятую (пусто — все свои)."""
-    return ", ".join(sorted(set(section) - allowed))
+def options_problem(value, where):
+    """options секции: отображение с единственным ключом provider (судья)."""
+    if not isinstance(value, dict):
+        return f"{where} не отображение ({type(value).__name__})"
+    return section_problem(value, OPTIONS_PROFILE, where, "options")
 
 
-def reject_foreign_keys(section, allowed, where):
-    """Ключ вне перечня профиля — отказ до запуска: за чужим ключом стоит чужой код."""
-    extra = foreign_keys(section, allowed)
-    if extra:
-        raise Unsupported(f"{where}: ключи вне профиля пробы ({extra}) — поддержанный режим "
-                          "перечислен целиком, и что делает чужой ключ, не проверено")
+def evaluate_options_problem(value, where):
+    """evaluateOptions: только repeat, и тот равен единице — иначе строк больше, чем проб."""
+    if not isinstance(value, dict):
+        return f"{where} не отображение ({type(value).__name__})"
+    why = section_problem(value, EVALUATE_OPTIONS_PROFILE, where, "evaluateOptions")
+    if why:
+        return why
+    repeat = value.get("repeat", 1)      # promptfoo без ключа делает один прогон
+    if repeat != 1:
+        return f"{where}.repeat = {repeat!r}: повтор даёт несколько строк на одну пробу"
+    return None
+
+
+# Схемы секций: «ключ → проверка значения или None». Всё, чего нет в схеме, отклоняется.
+ROOT_PROFILE = {"providers": None, "prompts": None, "tests": None, "defaultTest": None,
+                "evaluateOptions": evaluate_options_problem}
+EVALUATE_OPTIONS_PROFILE = {"repeat": None}
+TEST_PROFILE = {"vars": None, "assert": None, "threshold": number_problem,
+                "description": text_problem}
+DEFAULT_TEST_PROFILE = {"vars": None, "assert": None, "options": options_problem}
+OPTIONS_PROFILE = {"provider": None}                     # судья, и только он
+ASSERT_PROFILE = {"type": None, "value": None, "weight": number_problem,
+                  "metric": text_problem}
 
 
 def plain_vars(source, where):
@@ -300,7 +266,7 @@ def plain_vars(source, where):
         if isinstance(value, list):
             raise Unsupported(f"{where}.vars.{key} — список: promptfoo развернёт комбинации, "
                               "и набор перестанет быть списком проб")
-        prefix = dynamic_prefix(value) if isinstance(value, str) else None
+        prefix = dynamic_prefix(value)
         if prefix:
             raise Unsupported(f"{where}.vars.{key} начинается с {prefix} — promptfoo "
                               "подставит содержимое файла, а .js и .py выполнит")
@@ -347,16 +313,12 @@ def assertion_problem(item, where):
         return f"{where}: нет строкового type ({kind!r})"
     # Тип разбирается раньше ключей: у `assert-set` свой ключ `assert`, и отказ по нему
     # назвал бы чужой ключ вместо причины, по которой группа не поддержана.
-    if kind in REJECTED_ASSERT_REASONS:
-        return f"{where}: {REJECTED_ASSERT_REASONS[kind]}"
     if kind not in SUPPORTED_ASSERT_TYPES:
-        return (f"{where}: тип {kind} вне профиля: как он сообщает о сбое своего выполнения, "
-                "не проверено — такой сбой пришёл бы решением о модели")
-    extra = foreign_keys(item, SUPPORTED_ASSERT_KEYS)
-    if extra:
-        return (f"{where}: ключи вне профиля проверки ({extra}) — за ними стоит чужой код "
-                "или своя обработка ответа")
-    return field_problem(item, where) or value_problem(kind, item, where)
+        why = REJECTED_ASSERT_REASONS.get(kind, "вне профиля: как он сообщает о сбое своего "
+                                                "выполнения, не проверено — такой сбой "
+                                                "пришёл бы решением о модели")
+        return f"{where}: тип {kind} не поддержан — {why}"
+    return section_problem(item, ASSERT_PROFILE, where, "проверки") or value_problem(kind, item, where)
 
 
 def asserts_of(section, where):
@@ -373,29 +335,9 @@ def asserts_of(section, where):
     return value
 
 
-def reject_unsupported_test_keys(section, where):
-    """Ключи пробы вне поддержанного режима: одна проверка на defaultTest и на tests[]."""
-    for key, why in UNSUPPORTED_TEST_KEYS.items():
-        if key in section:
-            raise Unsupported(f"{where}.{key} {why}")
-
-
-def check_options(section, where):
-    """options секции: только судья в options.provider."""
-    if "options" not in section:
-        return
-    options = section["options"]
-    if not isinstance(options, dict):
-        raise Unsupported(f"{where}.options не отображение ({type(options).__name__})")
-    reject_foreign_keys(options, SUPPORTED_OPTION_KEYS, f"{where}.options")
-
-
-def check_section(section, allowed, where):
-    """Проба или defaultTest целиком: адресные запреты, ключи профиля, типы полей."""
-    reject_unsupported_test_keys(section, where)
-    reject_foreign_keys(section, allowed, where)
-    check_options(section, where)
-    why = field_problem(section, where)
+def check_section(section, profile, where, what):
+    """Секция целиком по схеме; иначе Unsupported."""
+    why = section_problem(section, profile, where, what)
     if why:
         raise Unsupported(why)
 
@@ -405,7 +347,7 @@ def expected_tests(cfg):
     default = cfg.get("defaultTest") or {}
     if not isinstance(default, dict):
         raise Unsupported(f"defaultTest не отображение ({type(default).__name__})")
-    check_section(default, SUPPORTED_DEFAULT_TEST_KEYS, "defaultTest")
+    check_section(default, DEFAULT_TEST_PROFILE, "defaultTest", "пробы")
     common = asserts_of(default, "defaultTest")
     tests = cfg.get("tests")
     if not isinstance(tests, list) or not tests:
@@ -417,7 +359,7 @@ def expected_tests(cfg):
         if not isinstance(test, dict):
             raise Unsupported(f"{where} не отображение ({type(test).__name__}) — "
                               "внешние и сгенерированные пробы не поддержаны")
-        check_section(test, SUPPORTED_TEST_KEYS, where)
+        check_section(test, TEST_PROFILE, where, "пробы")
         checks = [*common, *asserts_of(test, where)]
         if not checks:
             raise Unsupported(f"{where}: ни одной проверки после слияния с defaultTest — "
@@ -431,7 +373,7 @@ def single_prompt(cfg):
     """Единственный промпт-строка: второй промпт умножает набор на два."""
     prompts = cfg.get("prompts")
     if (not isinstance(prompts, list) or len(prompts) != 1
-            or not isinstance(prompts[0], str) or prompts[0].startswith("file://")):
+            or not isinstance(prompts[0], str) or dynamic_prefix(prompts[0])):
         raise Unsupported("нужен ровно один промпт-строка (не file:// и не объект): "
                           "иначе набор — матрица «промпт × проба»")
     return prompts[0]
@@ -456,17 +398,7 @@ def build_manifest(cfg, node, version):
         path, raw, why = ambiguous[0]
         raise Unsupported(f"{path or 'корень'}: плоский скаляр «{raw}» — {why}; "
                           "заключите значение в кавычки")
-    for key in UNSUPPORTED_KEYS:
-        if key in cfg:
-            raise Unsupported(f"ключ {key} не поддержан: он меняет состав набора или "
-                              "пишет файлы мимо -o")
-    options = cfg.get("evaluateOptions") or {}
-    if not isinstance(options, dict):
-        raise Unsupported(f"evaluateOptions не отображение ({type(options).__name__})")
-    repeat = options.get("repeat", 1)      # promptfoo без ключа делает один прогон
-    if repeat != 1:
-        raise Unsupported(f"evaluateOptions.repeat = {repeat!r}: повтор даёт несколько "
-                          "строк на одну пробу")
+    check_section(cfg, ROOT_PROFILE, "корень", "конфига")
     return {"version": 1, "promptfoo": version,
             "provider": single_provider(cfg), "prompt": single_prompt(cfg),
             "tests": expected_tests(cfg)}

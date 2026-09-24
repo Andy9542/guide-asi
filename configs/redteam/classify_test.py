@@ -175,6 +175,11 @@ def stamp(results, tests):
     return rows
 
 
+def with_case(index, extra):
+    """Полный набор, в котором у одной строки testCase дополнен или подменён полями."""
+    return blob(changed(index, "testCase", {**case_of(index), **extra}))
+
+
 def full(order=(0, 1, 2)):
     """Строки в заданном порядке индексов: testIdx и testCase согласованы между собой."""
     rows = []
@@ -290,39 +295,37 @@ def cases(tmpdir):
                                                                                            0,   3, "results.prompts"),
         ("провайдер не тот",                 blob(changed(0, "provider", {"id": "openai:chat:chat", "label": ""})),
                                                                                            0,   3, "провайдер"),
-        ("vars пробы не те",                 blob(changed(1, "testCase", {**case_of(1), "vars": {"query": "чужая проба"}})),
+        ("vars пробы не те",                 with_case(1, {"vars": {"query": "чужая проба"}}),
                                                                                            0,   3, "vars"),
-        ("assert пробы подменён",            blob(changed(2, "testCase", {**case_of(2), "assert": [{"type": "icontains", "value": "REFUSE"}]})),
+        ("assert пробы подменён",            with_case(2, {"assert": [{"type": "icontains", "value": "REFUSE"}]}),
                                                                                            0,   3, "assert"),
-        ("testCase.provider переопределяет цель", blob(changed(0, "testCase", {**case_of(0), "provider": {"id": "echo", "label": "per-test"}})),
+        ("testCase.provider переопределяет цель", with_case(0, {"provider": {"id": "echo", "label": "per-test"}}),
                                                                                            0,   3, "provider"),
-        ("testCase.providerOutput — ответ подставлен", blob(changed(0, "testCase", {**case_of(0), "providerOutput": "I refuse"})),
+        ("testCase.providerOutput — ответ подставлен", with_case(0, {"providerOutput": "I refuse"}),
                                                                                            0,   3, "providerOutput"),
         # Вторая линия полного профиля пробы, IA-07 повторно (первая — preflight).
         # Формы testCase сняты с выгрузок 0.123.0: promptfoo кладёт туда `transform` и
         # значение проверки как есть, поэтому чужой код виден по самой выгрузке.
         ("testCase.assertScoringFunction — решение вынес чужой код",
-         blob(changed(0, "testCase", {**case_of(0), "assertScoringFunction": "file://score.mjs"})),
+         with_case(0, {"assertScoringFunction": "file://score.mjs"}),
                                                                                            0,   3, "assertScoringFunction"),
         ("testCase.transform переписывает ответ",
-         blob(changed(1, "testCase", {**case_of(1), "transform": "'I refuse'"})),          0,   3, "transform"),
+         with_case(1, {"transform": "'I refuse'"}),          0,   3, "transform"),
         ("testCase.options.transform переписывает ответ",
-         blob(changed(1, "testCase", {**case_of(1), "options": {"transform": "'I refuse'"}})),
+         with_case(1, {"options": {"transform": "'I refuse'"}}),
                                                                                            0,   3, "transform"),
         ("значение проверки file://",
-         blob(changed(2, "testCase", {**case_of(2),
-                                      "assert": [{"type": "contains", "value": "file:///x.py"}]})),
+         with_case(2, {"assert": [{"type": "contains", "value": "file:///x.py"}]}),
                                                                                            0,   3, "file://"),
         ("file:// внутри списка contains-any",
-         blob(changed(2, "testCase", {**case_of(2),
-                                      "assert": [{"type": "contains-any",
-                                                  "value": ["refuse", "file:///x.py"]}]})),
+         with_case(2, {"assert": [{"type": "contains-any",
+                                                  "value": ["refuse", "file:///x.py"]}]}),
                                                                                            0,   3, "file://"),
         # Контроль: promptfoo кладёт в testCase и порог с описанием, и пустые options с
         # metadata (сверено выгрузкой) — вердикта это не лишает.
         ("порог и описание в testCase",
-         blob(changed(0, "testCase", {**case_of(0), "threshold": 0.5, "description": "probe",
-                                      "options": {}, "metadata": {}})),                    0,   0),
+         with_case(0, {"threshold": 0.5, "description": "probe",
+                                      "options": {}, "metadata": {}}),                    0,   0),
         ("классификатор без --expected",     blob(full()),                                 0,   3, "манифест", OMIT_EXPECTED),
         ("манифеста нет",                    blob(full()),                                 0,   3, "манифест",
                                                                             os.path.join(tmpdir, "нет-манифеста.json")),

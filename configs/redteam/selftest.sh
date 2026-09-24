@@ -66,60 +66,31 @@ expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$HERE/testdata/echo-pass.
 expect 1 'REDTEAM_VERDICT=fail' -- env REDTEAM_CONFIG="$HERE/testdata/echo-fail.yaml" \
     REDTEAM_JSON="$TMP/fail.json" sh "$HERE/run.sh"
 
-# Не поддержанный режим (второй целевой провайдер) отклоняется ДО вызова модели: promptfoo
-# не запускается, выгрузки нет. Без этого шесть строк на три пробы читались как полный набор.
-expect 3 'REDTEAM_VERDICT=infra' -- env REDTEAM_CONFIG="$HERE/testdata/echo-unsupported.yaml" \
-    REDTEAM_JSON="$TMP/unsupported.json" sh "$HERE/run.sh"
-saw 'ровно один целевой провайдер'
-never 'Writing output to'
-expect 1 '' -- test -e "$TMP/unsupported.json"
-
-# Готовый ответ в пробе (`providerOutput`) promptfoo подставляет вместо вызова провайдера:
-# набор «выполнен целиком», все проверки «прошли», цель не спрошена ни разу, и ответ при
-# этом не кэшированный. Отклоняется ДО вызова promptfoo. Контроль пары — прогон по
-# мёртвому шлюзу выше: тот же провайдер без подстановки даёт INFRA.
-expect 3 'providerOutput' -- env REDTEAM_CONFIG="$HERE/testdata/provider-output.yaml" \
-    REDTEAM_JSON="$TMP/po.json" sh "$HERE/run.sh"
-saw 'REDTEAM_VERDICT=infra'
-never 'Writing output to'
-expect 1 '' -- test -e "$TMP/po.json"
-
-# Профиль проверок, IA-06. Пустая группа `assert-set` в 0.123.0 даёт компонент с
-# `pass: true`, пустым componentResults и assertionCount 0: ответ не оценён ни одной
-# проверкой. До профиля полный run.sh на этом конфиге давал код 0 и REDTEAM_VERDICT=pass
-# на ответе «unsafe answer». Теперь конфиг отклоняется ДО вызова promptfoo.
-expect 3 'assert-set' -- env REDTEAM_CONFIG="$HERE/testdata/assert-set-empty.yaml" \
-    REDTEAM_JSON="$TMP/assert-set.json" sh "$HERE/run.sh"
-saw 'REDTEAM_VERDICT=infra'
-never 'Writing output to'
-expect 1 '' -- test -e "$TMP/assert-set.json"
-
-# Профиль проверок, IA-07. Сорвавшаяся javascript-проверка приходит как обычный
-# `pass: false` без graderError: до профиля первый конфиг давал код 1 («модель провалила
-# пробу»), а второй — код 0 «Aggregate score 0.50 ≥ 0.5 threshold», зачитывая
-# несостоявшийся замер как состоявшийся.
-expect 3 'javascript' -- env REDTEAM_CONFIG="$HERE/testdata/javascript-crash.yaml" \
-    REDTEAM_JSON="$TMP/js.json" sh "$HERE/run.sh"
-never 'Writing output to'
-expect 3 'javascript' -- env REDTEAM_CONFIG="$HERE/testdata/javascript-threshold.yaml" \
-    REDTEAM_JSON="$TMP/js-threshold.json" sh "$HERE/run.sh"
-never 'Writing output to'
-
-# Профиль пробы, IA-07 повторно. Разрешённый ТИП проверки не отвечает за её параметры:
-# `value: file://…` у contains заставляет 0.123.0 выполнить функцию по этому пути, а
-# `assertScoringFunction` отдаёт общее решение пробы чужому коду. Контрпримеры аудита
-# 24.09.2026 воспроизводились полным run.sh с абсолютным путём к функции: первый — код 0
-# и `REDTEAM_VERDICT=pass` («Aggregate score 0.50 ≥ 0.5 threshold» при сорвавшейся первой
-# проверке), второй — код 1 и FAIL с причиной «Scoring function error». В фикстурах путь
-# относительный (абсолютный был бы привязан к машине), и promptfoo его не разрешит:
-# прогон идёт по копии конфига во временном каталоге. Проверяется то же, ради чего
-# правка: оба конфига отклонены ДО запуска promptfoo.
-expect 3 'file://' -- env REDTEAM_CONFIG="$HERE/testdata/dynamic-value.yaml" \
-    REDTEAM_JSON="$TMP/dynamic.json" sh "$HERE/run.sh"
-never 'Writing output to'
-expect 3 'assertScoringFunction' -- env REDTEAM_CONFIG="$HERE/testdata/scoring-function.yaml" \
-    REDTEAM_JSON="$TMP/scoring.json" sh "$HERE/run.sh"
-never 'Writing output to'
+# Конфиги вне поддержанного режима отклоняются ДО вызова promptfoo: код 3, INFRA, в
+# выводе нет «Writing output to», выгрузки по REDTEAM_JSON нет. Что именно и почему
+# отклоняется, рассказано в README («Поддержанный режим», «Профиль пробы») и в шапках
+# самих фикстур; здесь — только контракт отказа.
+rejected_before_run() {  # rejected_before_run <имя> <подстрока причины> <конфиг>
+  expect 3 "$2" -- env REDTEAM_CONFIG="$3" REDTEAM_JSON="$TMP/$1.json" sh "$HERE/run.sh"
+  saw 'REDTEAM_VERDICT=infra'
+  never 'Writing output to'
+  expect 1 '' -- test -e "$TMP/$1.json"
+}
+# Второй целевой провайдер: без отказа шесть строк на три пробы читались как полный набор.
+rejected_before_run unsupported 'ровно один целевой провайдер' "$HERE/testdata/echo-unsupported.yaml"
+# Готовый ответ в пробе: promptfoo подставляет его вместо вызова провайдера, ответ при
+# этом не кэшированный. Контроль пары — прогон по мёртвому шлюзу выше: без подстановки INFRA.
+rejected_before_run po 'providerOutput' "$HERE/testdata/provider-output.yaml"
+# Профиль проверок (IA-06, IA-07): пустая группа assert-set давала pass без единой
+# проверки, сорвавшаяся javascript — провал модели, а с порогом 0.5 — снова pass.
+rejected_before_run assert-set 'assert-set' "$HERE/testdata/assert-set-empty.yaml"
+rejected_before_run js 'javascript' "$HERE/testdata/javascript-crash.yaml"
+rejected_before_run js-threshold 'javascript' "$HERE/testdata/javascript-threshold.yaml"
+# Профиль пробы (IA-07 повторно): file:// у разрешённого contains исполняет код,
+# assertScoringFunction отдаёт решение пробы чужому коду. Отказ — по префиксу и по ключу,
+# до открытия файла: относительный путь в фикстурах на случай не влияет.
+rejected_before_run dynamic 'file://' "$HERE/testdata/dynamic-value.yaml"
+rejected_before_run scoring 'assertScoringFunction' "$HERE/testdata/scoring-function.yaml"
 
 # Контроль к обоим: тот же порог на ИСПРАВНЫХ проверках поддержан и вердикта не теряет.
 # Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5 — прогон идёт до конца.

@@ -39,7 +39,7 @@ VERSION = "0.123.0"
 
 sys.dont_write_bytecode = True  # иначе рядом с модулем остаётся __pycache__
 sys.path.insert(0, HERE)
-import classify  # noqa: E402  — профиль проверок сверяется с копией в классификаторе
+import classify  # noqa: E402  — источник профиля типов и префиксов для обеих линий
 import preflight  # noqa: E402  — путь добавляется выше
 
 # Конфиг поддержанного режима: один провайдер, один промпт-строка, явный список проб.
@@ -228,9 +228,6 @@ def rejected():
         ("testdata/dynamic-value.yaml", testdata("dynamic-value.yaml"), "file://"),
         ("testdata/scoring-function.yaml", testdata("scoring-function.yaml"),
          "assertScoringFunction"),
-        ("assertScoringFunction в пробе",
-         swap(PROBE, PROBE + "    assertScoringFunction: file://score.mjs\n"),
-         "assertScoringFunction"),
         ("assertScoringFunction в defaultTest",
          MINIMAL + "defaultTest:\n  assertScoringFunction: file://score.mjs\n",
          "assertScoringFunction"),
@@ -241,12 +238,11 @@ def rejected():
          MINIMAL + "defaultTest:\n  options:\n    transform: \"'I refuse'\"\n", "transform"),
         ("vars со значением file://", swap('{query: "I refuse A"}', '{query: "file://x.py"}'),
          "file://"),
-        ("value с префиксом python:",
-         swap(ASSERT, '    assert: [{type: contains, value: "python: return True"}]\n'),
-         "python:"),
-        ("value с префиксом javascript:",
-         swap(ASSERT, '    assert: [{type: contains, value: "javascript: 1 + 1"}]\n'),
-         "javascript:"),
+        # Кортеж захардкожен, а не взят из preflight.DYNAMIC_PREFIXES: иначе тест выводился
+        # бы из проверяемого.
+        *[(f"value с префиксом {prefix}",
+           swap(ASSERT, f'    assert: [{{type: contains, value: "{prefix} 1 + 1"}}]\n'), prefix)
+          for prefix in ("python:", "javascript:", "js:")],
         ("file:// внутри списка contains-any",
          swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, "file://x.py"]}]\n'),
          "file://"),
@@ -268,6 +264,12 @@ def rejected():
         ("is-json со значением file://",
          swap(ASSERT, '    assert: [{type: is-json, value: "file://schema.json"}]\n'),
          "file://"),
+        # Корень конфига — тоже схема, а не список запретов: за незнакомым ключом может
+        # стоять чужой код (nunjucksFilters грузит JS) или другой состав набора.
+        ("незнакомый ключ корня", MINIMAL + "nunjucksFilters:\n  shout: file://shout.js\n",
+         "вне профиля"),
+        ("evaluateOptions вне профиля", MINIMAL + "evaluateOptions:\n  maxConcurrency: 1\n",
+         "вне профиля"),
     ]
 
 
@@ -432,35 +434,17 @@ def check_rejected(name, text, want_err, *, work):
     return report(name, found)
 
 
-def check_profile_copies(name):
-    """Профиль проверок один: копия в classify обязана совпадать с preflight.
+def check_single_source(name):
+    """Профиль типов и префиксы у обеих линий — один объект из classify, не копия.
 
-    classify не зависит от PyYAML и держит свою константу; разойдутся — вторая линия
-    начнёт отвергать типы, которые preflight пропускает, или пропускать отклонённые.
+    Копия разошлась бы молча: вторая линия начала бы отвергать то, что первая
+    пропускает, или наоборот. Проверяется тождество, а не равенство.
     """
     found = []
-    for module in (preflight, classify):
-        if not isinstance(getattr(module, "SUPPORTED_ASSERT_TYPES", None), frozenset):
-            found.append(f"в {module.__name__} нет frozenset SUPPORTED_ASSERT_TYPES")
-    if not found and preflight.SUPPORTED_ASSERT_TYPES != classify.SUPPORTED_ASSERT_TYPES:
-        found.append("профили разошлись: "
-                     f"{sorted(preflight.SUPPORTED_ASSERT_TYPES ^ classify.SUPPORTED_ASSERT_TYPES)}")
-    return report(name, found)
-
-
-def check_prefix_copies(name):
-    """Динамические префиксы один список: копия в classify обязана совпадать с preflight.
-
-    Разойдутся — первая линия начнёт пропускать значение, которое вторая объявит чужим
-    кодом, или наоборот.
-    """
-    found = []
-    for module in (preflight, classify):
-        if not isinstance(getattr(module, "DYNAMIC_PREFIXES", None), tuple):
-            found.append(f"в {module.__name__} нет кортежа DYNAMIC_PREFIXES")
-    if not found and preflight.DYNAMIC_PREFIXES != classify.DYNAMIC_PREFIXES:
-        found.append(f"префиксы разошлись: в preflight {preflight.DYNAMIC_PREFIXES}, "
-                     f"в classify {classify.DYNAMIC_PREFIXES}")
+    if preflight.SUPPORTED_ASSERT_TYPES is not classify.SUPPORTED_ASSERT_TYPES:
+        found.append("SUPPORTED_ASSERT_TYPES в preflight — не тот объект, что в classify")
+    if preflight.dynamic_prefix is not classify.dynamic_prefix:
+        found.append("dynamic_prefix в preflight — не та функция, что в classify")
     return report(name, found)
 
 
@@ -517,9 +501,8 @@ def main():
         diffs += not check_write_failure("копию некуда записать",
                                          work=case_dir(work, number))
         number += 1
-        diffs += not check_profile_copies("профиль preflight = профиль classify")
+        diffs += not check_single_source("профиль и префиксы — один источник в classify")
         number += 1
-        diffs += not check_prefix_copies("префиксы preflight = префиксы classify")
         for case in rejected():
             number += 1
             diffs += not check_rejected(*case, work=case_dir(work, number))
