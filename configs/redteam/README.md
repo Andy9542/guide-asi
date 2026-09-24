@@ -98,7 +98,10 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 равен единице); проба — `vars`, `assert`, `threshold`, `description`; `defaultTest` —
 `vars`, `assert` и `options` с единственным ключом `provider` (судья); проверка — `type`,
 `value`, `weight` (число), `metric` (строка); объект провайдера (целевого и судьи) —
-строка или `id`, `label`, `config`. Любой другой ключ `preflight.py` отклоняет до
+строка или `id`, `label`, `config`; `id` без исполняемых префиксов: `file://`,
+`package:` и `python:` заставляют promptfoo загрузить провайдера из файла или модуля.
+Остальные виды провайдеров (`exec:`, `http`, `openai:`) профиль не различает:
+провайдер — выбор автора конфига. Любой другой ключ `preflight.py` отклоняет до
 запуска. Список запретов пришлось бы пополнять по одному полю за отчёт аудита:
 `assertScoringFunction` отдаёт общее решение пробы чужой функции; `transform` пробы,
 `options` и провайдера переписывает ответ модели до проверок, причём у провайдера в
@@ -156,7 +159,7 @@ error: …» без `metadata.graderError`. Полный `run.sh` на `testdata
 дал бы INFRA уже после вызова модели.
 
 Вторая линия живёт в `classify.py`: компонент обязан нести `assertion.type` из того же
-профиля (`SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` объявлены в `classify.py`,
+профиля (`SUPPORTED_ASSERT_TYPES` и `dynamic_prefix` объявлены в `classify.py`,
 `preflight.py` их импортирует, `preflight_test.py` проверяет тождество). Компонент без
 `assertion` (так приходит группа `assert-set`) или с типом вне профиля вердикта не даёт.
 Вердикта не даёт и строка, у которой в `testCase` есть `assertScoringFunction`, `transform`,

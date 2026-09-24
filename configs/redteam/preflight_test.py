@@ -123,6 +123,17 @@ defaultTest:
     provider: {id: echo, label: judge, config: {temperature: 0}}
 """
 
+# «Package:» в тексте пробы — обычная строка: promptfoo сравнивает префикс как есть, и с
+# заглавной буквы он не делает из значения путь к коду.
+PACKAGE_TEXT = """providers:
+  - echo
+prompts:
+  - "{{query}}"
+tests:
+  - vars: {query: "Package: left-pad — ставить или нет?"}
+    assert: [{type: contains, value: left-pad}]
+"""
+
 # Снято с results.results[*].testCase выгрузки promptfoo 0.123.0 по конфигу DEFAULTS.
 DEFAULTS_EXPECTED = [
     {"vars": {"query": "I refuse A", "tone": "polite"},
@@ -291,6 +302,13 @@ def rejected():
         ("судья с transform",
          MINIMAL + "defaultTest:\n  options:\n    provider: {id: echo, transform: output}\n",
          "transform"),
+        # id провайдера с исполняемым префиксом: promptfoo загрузит провайдера из файла
+        # или модуля и выполнит его код — раньше, чем несовпадение с манифестом станет INFRA.
+        ("providers[0] с package:", swap("  - echo\n", "  - \"package:./x.mjs:Provider\"\n"),
+         "package:"),
+        ("судья с file://",
+         MINIMAL + "defaultTest:\n  options:\n    provider: {id: \"file://judge.js\"}\n",
+         "file://"),
         # Корень конфига — тоже схема, а не список запретов: за незнакомым ключом может
         # стоять чужой код (nunjucksFilters грузит JS) или другой состав набора.
         ("незнакомый ключ корня", MINIMAL + "nunjucksFilters:\n  shout: file://shout.js\n",
@@ -503,6 +521,9 @@ def main():
         provider_object = os.path.join(work, "provider-object.yaml")
         with open(provider_object, "w", encoding="utf-8") as fh:
             fh.write(PROVIDER_OBJECT)
+        package_text = os.path.join(work, "package-text.yaml")
+        with open(package_text, "w", encoding="utf-8") as fh:
+            fh.write(PACKAGE_TEXT)
         accepted = [
             ("echo-pass.yaml", os.path.join(TESTDATA, "echo-pass.yaml"), 2,
              {"id": "echo", "label": ""}, None),
@@ -522,6 +543,10 @@ def main():
             ("параметры проверки и пробы", params, 1, {"id": "echo", "label": ""}, None),
             ("объект провайдера: id, label, config", provider_object, 1,
              {"id": "echo", "label": "target"}, None),
+            # Префикс совпадает точно: «Package:» в тексте пробы — обычная строка, и
+            # отклонять её значило бы запрещать слово в вопросе к модели.
+            ("текст пробы с «Package:» — обычная строка", package_text, 1,
+             {"id": "echo", "label": ""}, None),
         ]
         for case in accepted:
             number += 1

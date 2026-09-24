@@ -16,7 +16,7 @@ assert каждой пробы, целевой провайдер, промпт)
 и кладёт SHA-256 снимка в манифест (`config_sha256`). Ключей доступа манифест не содержит.
 
 Поддержанный режим перечислен целиком: схемы `*_PROFILE` ниже задают ключи корня,
-пробы, `defaultTest`, `options` и проверки; `SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES`
+пробы, `defaultTest`, `options` и проверки; `SUPPORTED_ASSERT_TYPES` и `dynamic_prefix`
 preflight импортирует из classify.py, чтобы у обеих линий был один источник. Всё вне
 схем — отказ до запуска с причиной; ключи из отчётов аудита получают адресную причину из
 `KEY_REASONS`. README («Профиль пробы») объясняет, почему каждый запрет нужен.
@@ -149,10 +149,11 @@ def provider_problem(value, where):
 
     `transform` провайдера переписывает ответ до проверок так же, как отклонённые
     `transform` пробы и options; в выгрузке его не видно, ловит только preflight.
-    Содержимое `config` принадлежит адаптеру и не проверяется.
+    Содержимое `config` принадлежит адаптеру и не проверяется. Сам id — без исполняемых
+    префиксов: по ним promptfoo грузит провайдера из файла или модуля и исполняет его код.
     """
     if isinstance(value, str):
-        return None
+        return executable_id_problem(value, where)
     if not isinstance(value, dict):
         return f"{where}: провайдер задан не строкой и не отображением с id ({type(value).__name__})"
     why = section_problem(value, PROVIDER_PROFILE, where, "провайдера")
@@ -160,6 +161,15 @@ def provider_problem(value, where):
         return why
     if not isinstance(value.get("id"), str):
         return f"{where}.id не строка ({value.get('id')!r})"
+    return executable_id_problem(value["id"], f"{where}.id")
+
+
+def executable_id_problem(provider_id, where):
+    """Почему id провайдера ведёт к чужому коду, или None."""
+    prefix = dynamic_prefix(provider_id)
+    if prefix:
+        return (f"{where} начинается с {prefix} — promptfoo загрузит провайдера из файла "
+                "или модуля по этому пути и выполнит его код")
     return None
 
 
@@ -191,8 +201,8 @@ def static_problem(value, where):
         return why
     prefix = dynamic_prefix(value)
     if prefix:
-        return (f"{where} начинается с {prefix} — promptfoo возьмёт значение по этому пути "
-                "и выполнит код из файла, а сбой такой проверки придёт решением о модели")
+        return (f"{where} начинается с {prefix} — promptfoo возьмёт значение проверки "
+                "из кода по этому пути, а не из конфига")
     return None
 
 
@@ -253,7 +263,8 @@ def plain_vars(source, where):
     """vars как отображение статических скаляров.
 
     Список promptfoo разворачивает в комбинации проб, а за строкой с `file://` читает
-    файл (.js и .py — выполняет) и подставляет вместо значения переменной.
+    файл (.js и .py — выполняет), за `package:` грузит модуль и зовёт экспорт; результат
+    подставляет вместо значения переменной.
     """
     if source is None:
         return {}
@@ -266,7 +277,8 @@ def plain_vars(source, where):
         prefix = dynamic_prefix(value)
         if prefix:
             raise Unsupported(f"{where}.vars.{key} начинается с {prefix} — promptfoo "
-                              "подставит содержимое файла, а .js и .py выполнит")
+                              "возьмёт значение переменной из файла или модуля по этому "
+                              "пути, выполнив его код")
     return source
 
 
