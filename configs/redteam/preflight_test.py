@@ -298,14 +298,19 @@ def rejected():
         ("судья с transform",
          MINIMAL + "defaultTest:\n  options:\n    provider: {id: echo, transform: output}\n",
          "transform"),
-        # id провайдера — echo или openai:… через шлюз: остальные виды promptfoo исполняет
-        # как код (exec:, file://, package:, голый файл .js) или ведёт мимо шлюза, и это
-        # случается раньше, чем несовпадение с манифестом станет INFRA.
+        # id провайдера — echo или openai:chat:<модель> через шлюз: остальное promptfoo
+        # исполняет как код (exec:, file://, package:, голый файл .js, openai:codex-*
+        # спавнит локальный процесс) или ведёт мимо шлюза, и это случается раньше, чем
+        # несовпадение с манифестом станет INFRA.
         ("providers[0] с package:", swap("  - echo\n", "  - \"package:./x.mjs:Provider\"\n"),
          "вне профиля провайдеров"),
         ("providers[0] — файл .js", swap("  - echo\n", "  - evil.js\n"),
          "вне профиля провайдеров"),
         ("providers[0] с exec:", swap("  - echo\n", "  - \"exec: touch x\"\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] openai:codex-app-server", swap("  - echo\n", "  - openai:codex-app-server\n"),
+         "вне профиля провайдеров"),
+        ("providers[0] openai:chat: без модели", swap("  - echo\n", "  - \"openai:chat:\"\n"),
          "вне профиля провайдеров"),
         ("судья с file://",
          MINIMAL + "defaultTest:\n  options:\n    provider: {id: \"file://judge.js\"}\n",

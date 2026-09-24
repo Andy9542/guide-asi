@@ -150,7 +150,7 @@ def provider_problem(value, where):
     `transform` провайдера переписывает ответ до проверок так же, как отклонённые
     `transform` пробы и options; в выгрузке его не видно, ловит только preflight.
     Содержимое `config` принадлежит адаптеру и не проверяется. Сам id — `echo` или
-    `openai:…`: остальные виды провайдеров promptfoo исполняет как код или ведёт мимо шлюза.
+    `openai:chat:<модель>`: остальное promptfoo исполняет как код или ведёт мимо шлюза.
     """
     if isinstance(value, str):
         return provider_id_problem(value, where)
@@ -165,15 +165,17 @@ def provider_problem(value, where):
 
 
 def provider_id_problem(provider_id, where):
-    """Почему id провайдера вне профиля, или None: `echo` либо `openai:…` через шлюз.
+    """Почему id провайдера вне профиля, или None: `echo` либо `openai:chat:<модель>`.
 
     Остальные виды провайдеров promptfoo исполняет как код (`exec:`, `file://`,
-    `package:`, файлы .js/.py) или ведёт мимо шлюза; перечислять их по одному бесполезно.
+    `package:`, файлы .js/.py, а под тем же `openai:` — `codex-*` и `agents`, которые
+    запускают локальный процесс) или ведёт мимо шлюза; перечислять их по одному бесполезно.
     """
-    if provider_id == "echo" or provider_id.startswith("openai:"):
+    if provider_id == "echo" or re.fullmatch(r"openai:chat:\S+", provider_id):
         return None
-    return (f"{where} вне профиля провайдеров ({provider_id!r}): принимаются echo и openai:… "
-            "через шлюз, остальные promptfoo исполняет как код или ведёт мимо шлюза")
+    return (f"{where} вне профиля провайдеров ({provider_id!r}): принимаются echo и "
+            "openai:chat:<модель> через шлюз, остальное promptfoo исполняет как код "
+            "или ведёт мимо шлюза")
 
 
 def provider_identity(provider):
