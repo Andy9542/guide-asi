@@ -170,7 +170,11 @@ def check_identity(position, row, manifest):
 
 
 def dynamic_prefix(value):
-    """Префикс, по которому promptfoo взял бы значение не из конфига, или None."""
+    """Префикс, по которому promptfoo взял бы значение не из конфига, или None.
+
+    Регистр не учитывается: promptfoo сравнивает префикс как есть, так что `PACKAGE:`
+    у него — обычная строка; отказ шире правила в безопасную сторону.
+    """
     if not isinstance(value, str):
         return None
     lowered = value.lower()
