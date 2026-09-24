@@ -1,6 +1,6 @@
 # Доработка PR #1 по третьему проходу аудита 24.09.2026: IA-09 и повторно открытый IA-07
 
-**Status:** executing
+**Status:** validating
 **Branch:** review-fixes
 **Worktree:** основной чекаут (`/home/ubuntu/projects/guide-asi`, ветка `review-fixes`)
 **Goal:** Контрпримеры третьего прохода (комментарий PR id=5807782177) воспроизводятся на `c122657` и не воспроизводятся на итоговой вершине: `osv-scanner.toml` в проверяемом дереве (`PackageOverrides ignore`, `IgnoredVulns`, в том числе во вложенном каталоге) не отключает находки OSV — `depscan.sh` на lock-файле с уязвимым пакетом даёт 1 «ОТКЛОНЕНО» независимо от локального конфига; конфиг red-team с динамическим значением проверки (`value: file://…`), с `assertScoringFunction`, `transform` или другим ключом вне профиля пробы отклоняется preflight до вызова promptfoo, а выгрузка с такими полями в `testCase` даёт INFRA; исправные контроли и пороговое агрегирование сохраняют исходы. Для каждого — регрессия в selftest через настоящие `depscan.sh`/`run.sh` или в тесте; `sh build/selftest.sh` → 0; CI зелёный на итоговой вершине; README и описание PR обновлены по факту.
@@ -96,4 +96,44 @@ Approach: две независимые фазы по каталогам, зат
 
 ## Verify
 
+Три независимых проверяющих (workflow `verify-ia79`, 24.09.2026) на `241867e` против базы `c122657`: 53 проверки, 51 pass, 2 fail (одна причина, закрыта фикс-раундом), 0 ИНФРА. Наблюдения: `scratchpad/verify5_results.json`.
+
+- **IA-09.** База: копия фикстуры с `PackageOverrides` даёт 0 «ЧИСТО», «Loaded filter from: /src/osv-scanner.toml», «Filtered 1 ignored package/s». Итог: `PackageOverrides`, `IgnoredVulns`, вложенный `sub/osv-scanner.toml`, `.gitignore` без `.git` и с пустым `.git` дают 1 «ОТКЛОНЕНО» без «Filtered»; прямой образ без `--config` фильтрует, с `--config /rules/osv-scanner.toml` нет; без `--no-ignore` lock из `.gitignore` не читается ни без `.git`, ни с ним (код 128), с флагом читается. Прежние исходы benign 0, malicious 1 (27 находок), no-manifest 4, broken-lock 3, большой файл 3 сохранены.
+- **IA-07.** База: полный `run.sh` с абсолютным путём к `dynamic-crash.py` даёт 0 pass с «Error running Python script» и «Aggregate score 0.50 ≥ 0.5 threshold», без порога 1; `assertScoringFunction` даёт 1 «Scoring function error». Итог: оба конфига дают 3 до promptfoo, выгрузки нет. Пятнадцать отклоняемых форм (`transform` в пробе и `options`, `assertScoringFunction` в `defaultTest`, `file://` в `vars`, `python:`/`javascript:` в значении, `file://` в элементе списка, чужие ключи проверки и пробы, `weight: true`, `metric: 1`, `threshold` строкой, `description` числом, `is-json` с `file://`) дают 3 одной строкой; принимаемые формы и четыре конфига гайда дают 0. Вторая линия на свежей выгрузке: `assertScoringFunction`, `transform`, `options.transform`, `file://` в значении дают 3, контроль с `description`/`threshold` 0. Прежние 51/50 имён случаев с прежними исходами. UK2: `testCase` экспорта 0.123.0 = `{vars, [description], [threshold], assert, options, metadata}`; `assertScoringFunction` в `testCase` не попадает, его отсекает только preflight.
+- **Сквозные.** Пути правок в границах PC3, темы и трейлеры коммитов верны, пины не менялись, `sh -n` и CRLF чисты, прежние тесты 29/11 OK, `provider-output.yaml` и `assert-set-empty.yaml` дают 3.
+- **CK14, CK15c fail.** `sh build/selftest.sh` на `241867e` давал 1 на `syntax_check`: эвристика башизмов (`\[\[[^:]`) ловила заголовки TOML `[[PackageOverrides]]` в printf-строках `selftest.sh` и в комментарии `depscan.sh`; `sh -n` чист, на базе попаданий нет.
+
+### Review
+
+up:reviewer по `c122657..241867e`: одна находка Important, README semgrep фиксировал «3 known vulnerabilities» вопреки собственному «число не утверждается». Не находки: `contains-any` со значением не-строкой роняет promptfoo до `gradingResult: null` (INFRA, безопасно); явный `now=` без прямого теста.
+
+Фикс-раунд `bc5a8bf`, `8c2c695`: политики OSV для фикстур в `testdata/osv-policies/*.toml`, комментарий `depscan.sh` без `[[`, `saw 'Scanned /src/sub/package-lock.json'` для вложенного каталога, README без числа уязвимостей, комментарий `dynamic-value.yaml` называет реальное поведение до правки (promptfoo резолвит относительный путь от копии конфига, получает FileNotFoundError и тем же агрегатом даёт 0). Сквозной `sh build/selftest.sh` → 0.
+
+### Simplify
+
+По просьбе автора `/simplify`: четыре агента по диффу `c122657..8c2c695`. Применено (`4c4e042`, `e264ded`, `0d6a782`):
+
+- один источник профиля типов и префиксов в `classify.py`, `preflight.py` импортирует, тест тождества вместо двух тестов равенства;
+- схемы секций `*_PROFILE` и одна `section_problem()` вместо денилиста поверх аллоулиста и шести хелперов; корень конфига и `evaluateOptions` тоже по схеме, незнакомый ключ даёт 3;
+- вторая линия classify: allowlist ключей `testCase` по форме экспорта 0.123.0;
+- одна копия фикстуры с обеими политиками OSV, `.gitignore` и `sub/` вместо четырёх прогонов `depscan.sh`; красный на базе по каждому флагу (без `--no-ignore` исход 4, без `--config` «Filtered»);
+- эвристика башизмов ловит `[[` только с пробелом после;
+- `rejected_before_run` в selftest redteam, `with_case` в classify_test, префиксы таблицей с `js:`, два случая на схему корня.
+
+Не применено: убирать числа случаев из README (соглашение репозитория); удалять `dynamic-crash.py`/`score-crash.mjs` (нужны для ручного воспроизведения с абсолютным путём); косметика таблиц тестов. Проверка: preflight_test 73, classify_test 56, selftest redteam 41 строка, selftest semgrep → 0, сквозной `sh build/selftest.sh` на `0d6a782` → 0. Повторное ревью: находок нет, «готово к слиянию»; ревьюер проверил импорт `classify` из любого cwd, порядок проверок в `section_problem`, приём `promptfooconfig.yaml`, форму `testCase` живыми прогонами 0.123.0 (ключи `vars, assert, [threshold, description], options, metadata`, судья в `options.provider` проходит), красноту объединённого дерева OSV при откате каждого флага и то, что `[[` без пробела не является условием bash. По просьбе автора тексты раунда прошли `/laconic` и stop-slop: два агента переписали README, докстринги, шапки фикстур и комментарии selftest обоих каталогов; код, команды и числа не менялись (AST модулей и некомментарные строки sh совпадают с HEAD), тесты 73/56/29 и ссылки чисты.
+
 ## Conclusion
+
+**Goal:** достигнут в части кода и проверок: контрпримеры IA-09 и IA-07 воспроизведены на `c122657` и закрыты, контроли сохранены, smoke → 0; CI на итоговой вершине и описание PR фиксируются последним коммитом.
+
+**Invariants:** IV1 (CK2–CK4, объединённое дерево selftest), IV2 (CK7–CK8, строки selftest на два конфига), IV3 (CK8, конфиги гайда), IV4 (CK9–CK10), IV5 (smoke, пины) подтверждены.
+
+**Assumptions:** AS1 подтверждена (сеть к api.osv.dev есть, lodash 4.17.20 с тремя уязвимостями на 24.09.2026); AS2 подтверждена (в 0.123.0 значение загружается только по `file://`).
+
+**Unknowns:** UK1 снят (`.gitignore` действует и без `.git`); UK2: 73 и 56 случаев, selftest redteam 41, semgrep 47 строк до объединения.
+
+**Deviations:** `DANGEROUS_TEST_KEYS` заменён allowlist'ом `TESTCASE_KEYS` с причинами; фикстуры red-team с относительным `file://` через `run.sh` функцию не исполняют (копия во временном каталоге), строки selftest доказывают отказ preflight до открытия файла, контрпримеры воспроизведены отдельно с абсолютным путём; корень конфига стал схемой (сверх плана, по находке /simplify).
+
+**Deferred:** судья `testCase.options.provider` с манифестом не сверяется; относительные `file://` в конфигах не резолвятся из-за копии во временном каталоге; фикстура с lodash 4.17.20 видна внешним сканерам зависимостей на гайде (README называет её намеренной).
+
+**Status:** validating — ждёт зелёного CI на итоговой вершине и обновления описания PR #1.
