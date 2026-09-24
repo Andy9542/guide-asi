@@ -256,6 +256,9 @@ def static_problem(value, where):
 
 # Необязательные поля с их типом: у проверки — weight и metric, у пробы — threshold и
 # description. Где какое поле уместно, решают перечни ключей профиля.
+# Один словарь на поля проверки (weight, metric) и пробы (threshold, description):
+# коллизий имён нет, потому что reject_foreign_keys() уже сузил каждую секцию до её
+# собственных ключей — порядок вызовов здесь несущий.
 FIELD_TYPES = {"weight": number_problem, "threshold": number_problem,
                "metric": text_problem, "description": text_problem}
 
