@@ -75,6 +75,9 @@ tests:
 # Строка проверки MINIMAL: случаи профиля подменяют её целиком.
 ASSERT = "    assert: [{type: contains, value: refuse}]\n"
 
+# Строка пробы MINIMAL: случаи ключей пробы дописывают к ней свой ключ.
+PROBE = '  - vars: {query: "I refuse A"}\n'
+
 # Типы профиля, которых в гайде нет, но которые поддержаны: сравнение без учёта
 # регистра, отрицание и судья. Формы сверены живым прогоном 0.123.0 — каждый компонент
 # приходит с `assertion.type`, исключений ни один тип не бросает.
@@ -88,6 +91,23 @@ tests:
       - {type: icontains, value: REFUSE}
       - {type: not-contains, value: "unsafe"}
       - {type: llm-rubric, value: "The response refuses"}
+"""
+
+# Параметры проверки и пробы, которые профиль принимает: вес и метрика у проверки,
+# описание и порог у пробы, схема-отображение у is-json, список строк у contains-any.
+# Кода за ними нет: promptfoo сравнивает их сам, отдельного пути исполнения не появляется.
+PARAMS = """providers:
+  - echo
+prompts:
+  - "{{query}}"
+tests:
+  - vars: {query: "I refuse A"}
+    description: probe with parameters
+    threshold: 0.5
+    assert:
+      - {type: contains, value: refuse, weight: 2, metric: refusal}
+      - {type: contains-any, value: [refuse, decline]}
+      - {type: is-json, value: {type: object, required: [ok]}}
 """
 
 # Снято с results.results[*].testCase выгрузки promptfoo 0.123.0 по конфигу DEFAULTS.
@@ -197,6 +217,57 @@ def rejected():
         ("проба без проверок", swap(ASSERT, ""), "ни одной проверки"),
         ("defaultTest.assert пуст, у пробы проверок нет",
          swap(ASSERT, "") + "defaultTest:\n  assert: []\n", "ни одной проверки"),
+        # Полный профиль пробы, IA-07 повторно (аудит 24.09.2026). Разрешённый ТИП
+        # проверки ничего не говорит о её параметрах: `value: file://…` у contains
+        # заставляет 0.123.0 загрузить и выполнить функцию по этому пути, а её исключение
+        # приходит компонентом pass: false без graderError. Оба конфига воспроизводились
+        # полным run.sh с абсолютным путём к функции: dynamic-value — код 0 «Aggregate
+        # score 0.50 ≥ 0.5 threshold» (без порога 1), scoring-function — код 1 «Scoring
+        # function error»; здесь проверяется отказ по префиксу и по ключу, до открытия
+        # файла, поэтому относительный путь фикстуры на случай не влияет.
+        ("testdata/dynamic-value.yaml", testdata("dynamic-value.yaml"), "file://"),
+        ("testdata/scoring-function.yaml", testdata("scoring-function.yaml"),
+         "assertScoringFunction"),
+        ("assertScoringFunction в пробе",
+         swap(PROBE, PROBE + "    assertScoringFunction: file://score.mjs\n"),
+         "assertScoringFunction"),
+        ("assertScoringFunction в defaultTest",
+         MINIMAL + "defaultTest:\n  assertScoringFunction: file://score.mjs\n",
+         "assertScoringFunction"),
+        # transform переписывает ответ модели до проверок: «отказ» приходит из конфига.
+        ("transform в пробе", swap(PROBE, PROBE + "    transform: \"'I refuse'\"\n"),
+         "transform"),
+        ("defaultTest.options.transform",
+         MINIMAL + "defaultTest:\n  options:\n    transform: \"'I refuse'\"\n", "transform"),
+        ("vars со значением file://", swap('{query: "I refuse A"}', '{query: "file://x.py"}'),
+         "file://"),
+        ("value с префиксом python:",
+         swap(ASSERT, '    assert: [{type: contains, value: "python: return True"}]\n'),
+         "python:"),
+        ("value с префиксом javascript:",
+         swap(ASSERT, '    assert: [{type: contains, value: "javascript: 1 + 1"}]\n'),
+         "javascript:"),
+        ("file:// внутри списка contains-any",
+         swap(ASSERT, '    assert: [{type: contains-any, value: [refuse, "file://x.py"]}]\n'),
+         "file://"),
+        ("ключ transform у проверки",
+         swap(ASSERT, '    assert: [{type: contains, value: refuse, transform: "output"}]\n'),
+         "transform"),
+        ("ключ provider у проверки",
+         swap(ASSERT, "    assert: [{type: contains, value: refuse, provider: echo}]\n"),
+         "provider"),
+        ("ключ metadata у пробы", swap(PROBE, PROBE + "    metadata: {tag: audit}\n"),
+         "metadata"),
+        ("weight логическим",
+         swap(ASSERT, "    assert: [{type: contains, value: refuse, weight: true}]\n"),
+         "weight"),
+        ("metric числом",
+         swap(ASSERT, "    assert: [{type: contains, value: refuse, metric: 1}]\n"), "metric"),
+        ("threshold строкой", swap(PROBE, PROBE + '    threshold: "0.5"\n'), "threshold"),
+        ("description числом", swap(PROBE, PROBE + "    description: 1\n"), "description"),
+        ("is-json со значением file://",
+         swap(ASSERT, '    assert: [{type: is-json, value: "file://schema.json"}]\n'),
+         "file://"),
     ]
 
 
@@ -377,6 +448,22 @@ def check_profile_copies(name):
     return report(name, found)
 
 
+def check_prefix_copies(name):
+    """Динамические префиксы один список: копия в classify обязана совпадать с preflight.
+
+    Разойдутся — первая линия начнёт пропускать значение, которое вторая объявит чужим
+    кодом, или наоборот.
+    """
+    found = []
+    for module in (preflight, classify):
+        if not isinstance(getattr(module, "DYNAMIC_PREFIXES", None), tuple):
+            found.append(f"в {module.__name__} нет кортежа DYNAMIC_PREFIXES")
+    if not found and preflight.DYNAMIC_PREFIXES != classify.DYNAMIC_PREFIXES:
+        found.append(f"префиксы разошлись: в preflight {preflight.DYNAMIC_PREFIXES}, "
+                     f"в classify {classify.DYNAMIC_PREFIXES}")
+    return report(name, found)
+
+
 def report(name, found):
     print(f"[{'ok' if not found else 'ПРОВАЛ'}] {name}" + (f": {'; '.join(found)}" if found else ""))
     return not found
@@ -399,6 +486,9 @@ def main():
         profile = os.path.join(work, "profile.yaml")
         with open(profile, "w", encoding="utf-8") as fh:
             fh.write(PROFILE)
+        params = os.path.join(work, "params.yaml")
+        with open(params, "w", encoding="utf-8") as fh:
+            fh.write(PARAMS)
         accepted = [
             ("echo-pass.yaml", os.path.join(TESTDATA, "echo-pass.yaml"), 2,
              {"id": "echo", "label": ""}, None),
@@ -413,6 +503,9 @@ def main():
             ("echo-threshold.yaml", os.path.join(TESTDATA, "echo-threshold.yaml"), 1,
              {"id": "echo", "label": ""}, None),
             ("остальные типы профиля", profile, 1, {"id": "echo", "label": ""}, None),
+            # Параметры проверки и пробы из профиля: отклонять их значило бы запрещать
+            # формы, за которыми нет ни чужого кода, ни подмены ответа.
+            ("параметры проверки и пробы", params, 1, {"id": "echo", "label": ""}, None),
         ]
         for case in accepted:
             number += 1
@@ -425,6 +518,8 @@ def main():
                                          work=case_dir(work, number))
         number += 1
         diffs += not check_profile_copies("профиль preflight = профиль classify")
+        number += 1
+        diffs += not check_prefix_copies("префиксы preflight = префиксы classify")
         for case in rejected():
             number += 1
             diffs += not check_rejected(*case, work=case_dir(work, number))

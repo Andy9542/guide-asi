@@ -39,6 +39,18 @@ contains-all, icontains-any, icontains-all, is-json) и судья llm-rubric. �
 отклоняется там же: promptfoo вернул бы «No assertions», и звать модель незачем.
 `threshold` разрешён — агрегирование ИСПРАВНЫХ проверок поддержано.
 
+Профиль задан перечнем ключей, а не типом проверки: разрешённый тип не отвечает за то,
+как проверка выполняется. Проба — `vars`, `assert`, `threshold`, `description`;
+`defaultTest` — `vars`, `assert`, `options` с единственным ключом `provider` (судья);
+проверка — `type`, `value`, `weight`, `metric`. Значение проверки обязано быть статической
+строкой (у `*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением
+или ничем), значение переменной — статическим скаляром: за префиксом `file://` promptfoo
+0.123.0 грузит файл и ЗОВЁТ функцию из него даже у разрешённого `contains`, а её исключение
+приходит компонентом `pass: false` без `graderError`. Ключ вне перечня
+(`assertScoringFunction`, `transform`, `metadata`, …) — отказ до запуска: поддержанный режим
+перечислен целиком, иначе каждое новое поле promptfoo пришлось бы запрещать по одному,
+узнав о нём из отчёта аудита.
+
 Готовый ответ в пробе (`providerOutput`) не принимается: promptfoo подставляет его
 вместо вызова провайдера, и «набор выполнен, все проверки прошли» приходит из конфига,
 а не от цели. Поймать это по выгрузке нечем — ответ не кэшированный.
@@ -83,6 +95,27 @@ SUPPORTED_ASSERT_TYPES = frozenset({
     "contains-any", "contains-all", "icontains-any", "icontains-all", "is-json",
     "llm-rubric",
 })
+
+# Профиль пробы: ключи, которые поддержанный режим принимает. Перечень, а не список
+# запретов, — promptfoo понимает десятки полей пробы, и за любым из них может стоять
+# чужой код (`assertScoringFunction`) или подмена ответа (`transform`).
+SUPPORTED_TEST_KEYS = frozenset({"vars", "assert", "threshold", "description"})
+SUPPORTED_DEFAULT_TEST_KEYS = frozenset({"vars", "assert", "options"})
+SUPPORTED_OPTION_KEYS = frozenset({"provider"})            # судья, и только он
+SUPPORTED_ASSERT_KEYS = frozenset({"type", "value", "weight", "metric"})
+
+# Типы профиля, которые сравнивают ответ со списком строк; остальные — с одной строкой.
+LIST_VALUE_TYPES = frozenset({"contains-any", "contains-all",
+                              "icontains-any", "icontains-all"})
+
+# Префиксы, за которыми promptfoo берёт значение не из конфига. `file://` у значения
+# проверки в 0.123.0 грузит .py/.js и ЗОВЁТ функцию из него — даже у разрешённого
+# `contains`; исключение такой функции приходит компонентом `pass: false` без
+# `graderError` (контрпример аудита 24.09.2026). `python:`, `javascript:` и `js:` у value
+# в 0.123.0 не действуют, но отклоняются заранее: запретить дешевле, чем следить за тем,
+# когда очередная версия их включит. Копия — в classify.py (вторая линия, по выгрузке);
+# равенство копий проверяет preflight_test.py.
+DYNAMIC_PREFIXES = ("file://", "python:", "javascript:", "js:")
 
 EXECUTABLE_REASON = ("исполняемая проверка {kind} не поддержана: её сбой приходит как "
                      "pass: false без graderError и от отрицательного решения о модели "
@@ -189,8 +222,73 @@ def provider_identity(provider):
                       f"({type(provider).__name__})")
 
 
+def dynamic_prefix(text):
+    """Префикс, по которому promptfoo возьмёт значение не из конфига, или None."""
+    lowered = text.lower()
+    return next((prefix for prefix in DYNAMIC_PREFIXES if lowered.startswith(prefix)), None)
+
+
+def text_problem(value, where):
+    """Почему значение не строка, или None."""
+    if not isinstance(value, str):
+        return f"{where} не строка ({value!r})"
+    return None
+
+
+def number_problem(value, where):
+    """Почему значение не число, или None (логическое — не число: True весит 1)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"{where} не число ({value!r})"
+    return None
+
+
+def static_problem(value, where):
+    """Почему значение не статическая строка, или None."""
+    why = text_problem(value, where)
+    if why:
+        return why
+    prefix = dynamic_prefix(value)
+    if prefix:
+        return (f"{where} начинается с {prefix} — promptfoo возьмёт значение по этому пути "
+                "и выполнит код из файла, а сбой такой проверки придёт решением о модели")
+    return None
+
+
+# Необязательные поля с их типом: у проверки — weight и metric, у пробы — threshold и
+# description. Где какое поле уместно, решают перечни ключей профиля.
+FIELD_TYPES = {"weight": number_problem, "threshold": number_problem,
+               "metric": text_problem, "description": text_problem}
+
+
+def field_problem(section, where):
+    """Почему необязательное поле секции не того типа, или None."""
+    for key, check in FIELD_TYPES.items():
+        if key in section:
+            why = check(section[key], f"{where}.{key}")
+            if why:
+                return why
+    return None
+
+
+def foreign_keys(section, allowed):
+    """Ключи секции вне перечня профиля, через запятую (пусто — все свои)."""
+    return ", ".join(sorted(set(section) - allowed))
+
+
+def reject_foreign_keys(section, allowed, where):
+    """Ключ вне перечня профиля — отказ до запуска: за чужим ключом стоит чужой код."""
+    extra = foreign_keys(section, allowed)
+    if extra:
+        raise Unsupported(f"{where}: ключи вне профиля пробы ({extra}) — поддержанный режим "
+                          "перечислен целиком, и что делает чужой ключ, не проверено")
+
+
 def plain_vars(source, where):
-    """vars как отображение скаляров: список promptfoo разворачивает в комбинации проб."""
+    """vars как отображение статических скаляров.
+
+    Список promptfoo разворачивает в комбинации проб, а за строкой с `file://` читает
+    файл (.js и .py — выполняет) и подставляет вместо значения переменной.
+    """
     if source is None:
         return {}
     if not isinstance(source, dict):
@@ -199,6 +297,10 @@ def plain_vars(source, where):
         if isinstance(value, list):
             raise Unsupported(f"{where}.vars.{key} — список: promptfoo развернёт комбинации, "
                               "и набор перестанет быть списком проб")
+        prefix = dynamic_prefix(value) if isinstance(value, str) else None
+        if prefix:
+            raise Unsupported(f"{where}.vars.{key} начинается с {prefix} — promptfoo "
+                              "подставит содержимое файла, а .js и .py выполнит")
     return source
 
 
@@ -207,19 +309,51 @@ def merged_vars(default, test, where):
     return {**plain_vars(default, "defaultTest"), **plain_vars(test, where)}
 
 
-def assertion_problem(item):
+def list_value_problem(values, where):
+    """Почему значение-список вне профиля, или None."""
+    if not isinstance(values, list) or not values:
+        return f"{where} не непустой список строк ({type(values).__name__})"
+    for index, item in enumerate(values):
+        why = static_problem(item, f"{where}[{index}]")
+        if why:
+            return why
+    return None
+
+
+def value_problem(kind, item, where):
+    """Почему значение проверки вне профиля, или None.
+
+    `is-json` сравнивает ответ со схемой: её можно не задавать или задать отображением —
+    кода за таким значением нет. Остальные типы профиля сравнивают со строкой или со
+    списком строк, и строка обязана быть статической.
+    """
+    value = item.get("value")
+    if kind == "is-json" and (value is None or isinstance(value, dict)):
+        return None
+    if kind in LIST_VALUE_TYPES:
+        return list_value_problem(value, f"{where}.value")
+    return static_problem(value, f"{where}.value")
+
+
+def assertion_problem(item, where):
     """Почему проверка вне профиля, или None."""
     if not isinstance(item, dict):
-        return f"проверка не отображение ({type(item).__name__})"
+        return f"{where} не отображение ({type(item).__name__})"
     kind = item.get("type")
     if not isinstance(kind, str):
-        return f"у проверки нет строкового type ({kind!r})"
+        return f"{where}: нет строкового type ({kind!r})"
+    # Тип разбирается раньше ключей: у `assert-set` свой ключ `assert`, и отказ по нему
+    # назвал бы чужой ключ вместо причины, по которой группа не поддержана.
     if kind in REJECTED_ASSERT_REASONS:
-        return REJECTED_ASSERT_REASONS[kind]
+        return f"{where}: {REJECTED_ASSERT_REASONS[kind]}"
     if kind not in SUPPORTED_ASSERT_TYPES:
-        return (f"тип {kind} вне профиля: как он сообщает о сбое своего выполнения, не "
-                "проверено — такой сбой пришёл бы решением о модели")
-    return None
+        return (f"{where}: тип {kind} вне профиля: как он сообщает о сбое своего выполнения, "
+                "не проверено — такой сбой пришёл бы решением о модели")
+    extra = foreign_keys(item, SUPPORTED_ASSERT_KEYS)
+    if extra:
+        return (f"{where}: ключи вне профиля проверки ({extra}) — за ними стоит чужой код "
+                "или своя обработка ответа")
+    return field_problem(item, where) or value_problem(kind, item, where)
 
 
 def asserts_of(section, where):
@@ -230,9 +364,9 @@ def asserts_of(section, where):
     if not isinstance(value, list):
         raise Unsupported(f"{where}.assert не список ({type(value).__name__})")
     for index, item in enumerate(value):
-        why = assertion_problem(item)
+        why = assertion_problem(item, f"{where}.assert[{index}]")
         if why:
-            raise Unsupported(f"{where}.assert[{index}]: {why}")
+            raise Unsupported(why)
     return value
 
 
@@ -243,12 +377,32 @@ def reject_unsupported_test_keys(section, where):
             raise Unsupported(f"{where}.{key} {why}")
 
 
+def check_options(section, where):
+    """options секции: только судья в options.provider."""
+    if "options" not in section:
+        return
+    options = section["options"]
+    if not isinstance(options, dict):
+        raise Unsupported(f"{where}.options не отображение ({type(options).__name__})")
+    reject_foreign_keys(options, SUPPORTED_OPTION_KEYS, f"{where}.options")
+
+
+def check_section(section, allowed, where):
+    """Проба или defaultTest целиком: адресные запреты, ключи профиля, типы полей."""
+    reject_unsupported_test_keys(section, where)
+    reject_foreign_keys(section, allowed, where)
+    check_options(section, where)
+    why = field_problem(section, where)
+    if why:
+        raise Unsupported(why)
+
+
 def expected_tests(cfg):
     """Ожидаемые пробы в порядке конфига: индекс пробы — её место в этом списке."""
     default = cfg.get("defaultTest") or {}
     if not isinstance(default, dict):
         raise Unsupported(f"defaultTest не отображение ({type(default).__name__})")
-    reject_unsupported_test_keys(default, "defaultTest")
+    check_section(default, SUPPORTED_DEFAULT_TEST_KEYS, "defaultTest")
     common = asserts_of(default, "defaultTest")
     tests = cfg.get("tests")
     if not isinstance(tests, list) or not tests:
@@ -260,7 +414,7 @@ def expected_tests(cfg):
         if not isinstance(test, dict):
             raise Unsupported(f"{where} не отображение ({type(test).__name__}) — "
                               "внешние и сгенерированные пробы не поддержаны")
-        reject_unsupported_test_keys(test, where)
+        check_section(test, SUPPORTED_TEST_KEYS, where)
         checks = [*common, *asserts_of(test, where)]
         if not checks:
             raise Unsupported(f"{where}: ни одной проверки после слияния с defaultTest — "

@@ -298,6 +298,31 @@ def cases(tmpdir):
                                                                                            0,   3, "provider"),
         ("testCase.providerOutput — ответ подставлен", blob(changed(0, "testCase", {**case_of(0), "providerOutput": "I refuse"})),
                                                                                            0,   3, "providerOutput"),
+        # Вторая линия полного профиля пробы, IA-07 повторно (первая — preflight).
+        # Формы testCase сняты с выгрузок 0.123.0: promptfoo кладёт туда `transform` и
+        # значение проверки как есть, поэтому чужой код виден по самой выгрузке.
+        ("testCase.assertScoringFunction — решение вынес чужой код",
+         blob(changed(0, "testCase", {**case_of(0), "assertScoringFunction": "file://score.mjs"})),
+                                                                                           0,   3, "assertScoringFunction"),
+        ("testCase.transform переписывает ответ",
+         blob(changed(1, "testCase", {**case_of(1), "transform": "'I refuse'"})),          0,   3, "transform"),
+        ("testCase.options.transform переписывает ответ",
+         blob(changed(1, "testCase", {**case_of(1), "options": {"transform": "'I refuse'"}})),
+                                                                                           0,   3, "transform"),
+        ("значение проверки file://",
+         blob(changed(2, "testCase", {**case_of(2),
+                                      "assert": [{"type": "contains", "value": "file:///x.py"}]})),
+                                                                                           0,   3, "file://"),
+        ("file:// внутри списка contains-any",
+         blob(changed(2, "testCase", {**case_of(2),
+                                      "assert": [{"type": "contains-any",
+                                                  "value": ["refuse", "file:///x.py"]}]})),
+                                                                                           0,   3, "file://"),
+        # Контроль: promptfoo кладёт в testCase и порог с описанием, и пустые options с
+        # metadata (сверено выгрузкой) — вердикта это не лишает.
+        ("порог и описание в testCase",
+         blob(changed(0, "testCase", {**case_of(0), "threshold": 0.5, "description": "probe",
+                                      "options": {}, "metadata": {}})),                    0,   0),
         ("классификатор без --expected",     blob(full()),                                 0,   3, "манифест", OMIT_EXPECTED),
         ("манифеста нет",                    blob(full()),                                 0,   3, "манифест",
                                                                             os.path.join(tmpdir, "нет-манифеста.json")),

@@ -33,6 +33,14 @@ preflight.py по конфигу ДО вызова модели) задаёт и
 Поэтому смотрим не на наличие текста ошибки, а на наличие явного булева вердикта у
 каждого теста и у каждого компонента его проверки.
 
+Вторая линия профиля пробы — здесь же: строка выгрузки, у которой в `testCase` есть
+`assertScoringFunction`, `transform`, `options.transform`, `provider` или `providerOutput`
+либо значение проверки с динамическим префиксом (`file://`, `python:`, `javascript:`,
+`js:`), вердикта не получает. Полной формы экспорта эта линия не знает: в 0.123.0
+`assertScoringFunction` в `testCase` не попадает (он виден в `config.tests`), а
+`transform` и значение проверки попадают — состав наследуемых полей меняется с версией,
+и линия держится за то, чего в пробе быть не должно.
+
 Булева решения мало: компонент обязан назвать проверку, которая его вынесла
 (`assertion.type` из профиля поддержанных типов). Сорвавшаяся javascript-проверка
 приходит в 0.123.0 обычным `pass: false` с причиной «Custom function threw error: …» и
@@ -46,13 +54,24 @@ import sys
 
 CODES = {"pass": 0, "fail": 1, "infra": 3}
 
-# Копия профиля проверок из preflight.py. Своя, а не импорт: classify обязан работать
-# без PyYAML, от которого зависит preflight. Равенство копий проверяет preflight_test.py.
+# Копии профиля проверок и динамических префиксов из preflight.py. Свои, а не импорт:
+# classify обязан работать без PyYAML, от которого зависит preflight. Равенство копий
+# проверяет preflight_test.py.
 SUPPORTED_ASSERT_TYPES = frozenset({
     "contains", "icontains", "not-contains", "not-icontains", "equals", "starts-with",
     "contains-any", "contains-all", "icontains-any", "icontains-all", "is-json",
     "llm-rubric",
 })
+DYNAMIC_PREFIXES = ("file://", "python:", "javascript:", "js:")
+
+# Ключи пробы, за которыми в выгрузке стоит чужой код или чужой ответ. Полной формы
+# экспорта вторая линия не знает — она знает, чего в пробе быть не должно.
+DANGEROUS_TEST_KEYS = {
+    "provider": "проба ушла не целевому провайдеру",
+    "providerOutput": "ответ взят из конфига, модель не вызвана",
+    "assertScoringFunction": "общее решение пробы вынес чужой код, а не профиль проверок",
+    "transform": "ответ модели переписан до проверок",
+}
 
 
 def finish(verdict, message):
@@ -149,16 +168,55 @@ def check_identity(position, row, manifest):
         infra(f"#{position}: промпт строки не тот, что проверен preflight")
 
 
+def dynamic_prefix(value):
+    """Префикс, по которому promptfoo взял бы значение не из конфига, или None."""
+    if not isinstance(value, str):
+        return None
+    lowered = value.lower()
+    return next((prefix for prefix in DYNAMIC_PREFIXES if lowered.startswith(prefix)), None)
+
+
+def dynamic_value(case):
+    """Первое значение проверки, за которым стоит чужой код: (путь, префикс), или None.
+
+    Разрешённый тип проверки не отвечает за её значение: `contains` с `value: file://…`
+    в 0.123.0 грузит .py/.js и зовёт функцию из него, а её исключение приходит
+    компонентом `pass: false` без `graderError`.
+    """
+    for index, item in enumerate(case.get("assert") or []):
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value")
+        values = value if isinstance(value, list) else [value]
+        for prefix in (dynamic_prefix(one) for one in values):
+            if prefix:
+                return f"assert[{index}].value", prefix
+    return None
+
+
+def dangerous_key(case):
+    """Ключ пробы, за которым стоит чужой код или чужой ответ: (ключ, причина), или None."""
+    for key, why in DANGEROUS_TEST_KEYS.items():
+        if key in case:
+            return key, why
+    options = case.get("options")
+    if isinstance(options, dict) and "transform" in options:
+        return "options.transform", DANGEROUS_TEST_KEYS["transform"]
+    return None
+
+
 def check_test_case(position, row, expected):
     """Идентичность пробы: те же vars и те же assert, что зафиксировал preflight."""
     case = row.get("testCase")
     if not isinstance(case, dict):
         infra(f"#{position}: в строке нет testCase — идентичность пробы не подтверждена")
-    if "provider" in case:
-        infra(f"#{position}: в testCase есть provider — проба ушла не целевому провайдеру")
-    if "providerOutput" in case:
-        infra(f"#{position}: в testCase есть providerOutput — ответ взят из конфига, "
-              "модель не вызвана")
+    found = dangerous_key(case)
+    if found:
+        infra(f"#{position}: в testCase есть {found[0]} — {found[1]}")
+    found = dynamic_value(case)
+    if found:
+        infra(f"#{position}: {found[0]} в testCase начинается с {found[1]} — "
+              "проверку выполнял код по этому пути, а не сравнение из профиля")
     if canon(case.get("vars") or {}) != canon(expected["vars"]):
         infra(f"#{position}: vars пробы не те, что в манифесте — выгрузка из другого набора")
     if canon(case.get("assert") or []) != canon(expected["assert"]):

@@ -22,8 +22,8 @@ selftest не выполняет.
 
 ```sh
 pip install -r requirements.txt # единственная зависимость: PyYAML для preflight.py
-python3 classify_test.py        # классификатор на 50 выгрузках в форме promptfoo 0.123.0, без сети
-python3 preflight_test.py       # 51 случай: что допускается к прогону и что отклоняется
+python3 classify_test.py        # классификатор на 56 выгрузках в форме promptfoo 0.123.0, без сети
+python3 preflight_test.py       # 71 случай: что допускается к прогону и что отклоняется
 sh run.sh; echo "код: $?"       # [живой стенд] 0 прошло · 1 провалено · 3 не удалось измерить
 ```
 
@@ -95,7 +95,28 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 в `classify.py`: строка выгрузки, у которой `providerOutput` есть в `testCase`, вердикта
 не получает.
 
-**Профиль проверок.** Принимаются только типы с проверенным контрактом ошибок:
+**Профиль пробы.** Поддержанный режим перечислен ключами, а не запретами: проба —
+`vars`, `assert`, `threshold`, `description`; `defaultTest` — `vars`, `assert` и `options`
+с единственным ключом `provider` (судья); проверка — `type`, `value`, `weight` (число),
+`metric` (строка). Любой другой ключ отклоняется до запуска. Список запретов пришлось бы
+пополнять по одному полю за отчёт аудита: `assertScoringFunction` отдаёт общее решение
+пробы чужой функции, а `transform` переписывает ответ модели до проверок.
+
+Значения — тоже часть профиля: значение проверки обязано быть статической строкой (у
+`*-any`/`*-all` — непустым списком строк, у `is-json` — ещё и схемой-отображением),
+значение переменной — статическим скаляром. Префиксы `file://`, `python:`, `javascript:`
+и `js:` отклоняются: в 0.123.0 `value: file://check.py` у РАЗРЕШЁННОГО `contains` грузит
+файл и зовёт из него функцию, а её исключение приходит компонентом `pass: false` без
+`metadata.graderError`. Замерено полным `run.sh` по конфигам `testdata/dynamic-value.yaml`
+и `testdata/scoring-function.yaml`, где путь к функции заменён на абсолютный: в файлах он
+относительный, а прогон идёт по копии конфига во временном каталоге, и относительный путь
+promptfoo там не разрешит. Первый давал код 0 и `REDTEAM_VERDICT=pass` с причиной
+«Aggregate score 0.50 ≥ 0.5 threshold» — порог зачёл сорвавшуюся проверку наравне с
+состоявшейся, — а без порога код 1, то есть обвинение модели в сбое чужого кода; второй —
+код 1 и FAIL с причиной «Scoring function error: …». Теперь оба отклоняются до запуска
+promptfoo.
+
+**Типы проверок.** Принимаются только типы с проверенным контрактом ошибок:
 `contains`, `icontains`, `not-contains`, `not-icontains`, `equals`, `starts-with`,
 `contains-any`, `contains-all`, `icontains-any`, `icontains-all`, `is-json` и судья
 `llm-rubric`. Остальные отклоняются до вызова модели.
@@ -123,9 +144,15 @@ PROMPTFOO_REQUEST_BACKOFF_MS=0 REDTEAM_CONFIG=/tmp/dead.yaml REDTEAM_JSON=/tmp/d
 а звать её незачем.
 
 Вторая линия — в `classify.py`: компонент обязан нести `assertion.type` из того же
-профиля (константа `SUPPORTED_ASSERT_TYPES` есть в обоих файлах, равенство копий
-проверяет `preflight_test.py`). Компонент без `assertion` — так приходит группа
-`assert-set` — или с типом вне профиля вердикта не даёт.
+профиля (константы `SUPPORTED_ASSERT_TYPES` и `DYNAMIC_PREFIXES` есть в обоих файлах,
+равенство копий проверяет `preflight_test.py`). Компонент без `assertion` — так приходит
+группа `assert-set` — или с типом вне профиля вердикта не даёт. Вердикта не даёт и
+строка, у которой в `testCase` есть `assertScoringFunction`, `transform`,
+`options.transform`, `provider`, `providerOutput` или значение проверки с динамическим
+префиксом. Полной формы экспорта вторая линия не знает: в 0.123.0 `transform` и значение
+проверки в `testCase` видны, а `assertScoringFunction` остаётся только в `config.tests` —
+состав наследуемых полей меняется с версией, и линия держится за то, чего в пробе быть
+не должно.
 
 `regex` и `not-regex` — потому что некорректный шаблон в 0.123.0 приходит не
 исключением, а компонентом `pass: false` с причиной «Invalid regex pattern: …» без
@@ -140,8 +167,8 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 ## Что замерено `[стенд]`
 
 **В этом репозитории.** `sh selftest.sh` → `redteam: ok`, код 0 (35–60 секунд на
-прогретом кэше npx), 29 сошедшихся строк: `classify_test.py` → «расхождений 0» на 50
-выгрузках; `preflight_test.py` → «расхождений 0» на 51 случае; `sh -n` на `run.sh` и
+прогретом кэше npx), 33 сошедшихся строки: `classify_test.py` → «расхождений 0» на 56
+выгрузках; `preflight_test.py` → «расхождений 0» на 71 случае; `sh -n` на `run.sh` и
 `selftest.sh`; конфиг с мёртвым портом через `run.sh` → код 3 и `REDTEAM_VERDICT=infra`;
 `testdata/echo-pass.yaml` → код 0 и `REDTEAM_VERDICT=pass`; `testdata/echo-fail.yaml` →
 код 1 и `REDTEAM_VERDICT=fail`; `testdata/echo-unsupported.yaml` (второй целевой
@@ -150,7 +177,10 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 `providerOutput`, promptfoo так же не запускается и выгрузки нет; контрпримеры аудита
 23.09.2026 `testdata/assert-set-empty.yaml`, `testdata/javascript-crash.yaml` и
 `testdata/javascript-threshold.yaml` → код 3 со строкой про `assert-set` или
-`javascript`, без «Writing output to» и без выгрузки; контроль
+`javascript`, без «Writing output to» и без выгрузки; контрпримеры аудита 24.09.2026
+`testdata/dynamic-value.yaml` (динамическое значение у `contains`) и
+`testdata/scoring-function.yaml` (`assertScoringFunction`) → код 3 со строкой про
+`file://` или `assertScoringFunction`, тоже без «Writing output to»; контроль
 `testdata/echo-threshold.yaml` (порог 0.5 на двух исправных `contains`) → код 0,
 `REDTEAM_VERDICT=pass` и «Aggregate score 0.50» в выгрузке; выгрузка
 удачного прогона, подложенная по пути `REDTEAM_JSON`, после отклонённого прогона не
@@ -199,11 +229,14 @@ promptfoo (YAML 1.2) читают по-разному: `flag: yes` → `True` и
 Манифест сверяет состав набора и идентичность проб, но не свежесть ответа модели за
 пределами флага `--no-cache` и проверки `response.cached`.
 
-Профиль проверок узкий по той же причине: обвязка судит только о типах, у которых
-проверено, как они сообщают о сбое СВОЕГО выполнения. `assert-set`, `javascript` и
-`python` в гайде не используются; понадобятся — сначала проверьте контракт их ошибок на
-своей версии promptfoo, потом добавляйте тип в `SUPPORTED_ASSERT_TYPES` (константа в
-`preflight.py`, копия в `classify.py`).
+Профиль пробы узкий по той же причине: обвязка судит только о том, для чего проверено,
+как оно сообщает о сбое СВОЕГО выполнения. Ни `assert-set`, ни `javascript`, ни `python`,
+ни динамические значения, ни `assertScoringFunction` в гайде не используются;
+понадобятся — сначала проверьте контракт их ошибок на своей версии promptfoo, потом
+расширяйте перечни в `preflight.py` (`SUPPORTED_ASSERT_TYPES`, `SUPPORTED_TEST_KEYS`,
+`SUPPORTED_DEFAULT_TEST_KEYS`, `SUPPORTED_OPTION_KEYS`, `SUPPORTED_ASSERT_KEYS`,
+`DYNAMIC_PREFIXES`) и копии в `classify.py`. Для динамических проверок одного перечня
+мало: нужен структурированный статус их выполнения, которого в выгрузке 0.123.0 нет.
 
 Набор проб измеряет **модель**, а не систему. Агент может безупречно отказываться от всех
 трёх проб и при этом переводить деньги не туда, потому что у него слишком широкие права, —
