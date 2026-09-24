@@ -12,8 +12,9 @@ TMP=$(mktemp -d)
 # bind mount из /tmp хоста в контейнер не виден, и /src приезжает пустым.
 BIG=$(mktemp -d "$HERE/.selftest-big.XXXXXX")
 LOCKED=$(mktemp -d "$HERE/.selftest-locked.XXXXXX")
+OSVD=$(mktemp -d "$HERE/.selftest-osv.XXXXXX")
 # Права возвращаются до rm -rf: каталог с правами 000 не удалить, не открыв его.
-trap 'chmod -R u+rwx "$LOCKED" 2>/dev/null; rm -rf "$TMP" "$BIG" "$LOCKED"' EXIT
+trap 'chmod -R u+rwx "$LOCKED" 2>/dev/null; rm -rf "$TMP" "$BIG" "$LOCKED" "$OSVD"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -39,7 +40,8 @@ infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
 command -v docker >/dev/null 2>&1 || infra 'docker не найден'
 docker info >/dev/null 2>&1 || infra 'демон docker недоступен'
 command -v python3 >/dev/null 2>&1 || infra 'python3 не найден: depscan.sh нечем разбирать отчёт'
-[ -n "$BIG" ] && [ -n "$LOCKED" ] || infra 'не создаётся временный каталог рядом с selftest.sh'
+[ -n "$BIG" ] && [ -n "$LOCKED" ] && [ -n "$OSVD" ] ||
+  infra 'не создаётся временный каталог рядом с selftest.sh'
 
 # Версии берутся из depscan.sh, чтобы selftest не завёл вторую копию пина.
 read_pin() { sed -n "s/^$1='\(.*\)'\$/\1/p" "$HERE/depscan.sh"; }
@@ -59,6 +61,7 @@ done
 RULE=/rules/malicious-install-script.yaml
 SRC_MAL="$HERE/testdata/malicious"
 SRC_BEN="$HERE/testdata/benign"
+SRC_VUL="$HERE/testdata/vulnerable-lock"
 
 # Разбор отчёта Semgrep: таблица случаев на фикстурах реального формата.
 expect 0 'OK' -- python3 "$HERE/scan_result_test.py"
@@ -80,6 +83,48 @@ saw 'scan_result: НАХОДКА'
 # depscan: легитимный каталог проходит, и у OSV при этом был вход.
 expect 0 'ЧИСТО' -- sh "$HERE/depscan.sh" "$SRC_BEN"
 saw 'No issues found'
+
+# depscan: уязвимая зависимость в lock-файле отклоняется.
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$SRC_VUL"
+saw 'known vulnerabilities'
+
+# Дальше — четыре способа, которыми проверяемое дерево отменяло бы свою же проверку:
+# OSV читает osv-scanner.toml рядом с lock-файлом и .gitignore проекта. Политику
+# задаёт только доверенный osv-scanner.toml этого каталога, копии фикстуры собираются
+# в $OSVD, потому что менять testdata/ на ходу нельзя.
+osv_copy() {  # osv_copy <имя> — копия уязвимой фикстуры в $OSVD/<имя>
+  mkdir -p "$OSVD/$1" && cp "$SRC_VUL/package-lock.json" "$SRC_VUL/index.js" "$OSVD/$1/" ||
+    infra "не копируется фикстура в $OSVD/$1"
+}
+
+# Исключение всего пакета: до доверенного --config здесь было 0 «ЧИСТО» и
+# «Filtered 1 ignored package/s».
+osv_copy override
+printf '[[PackageOverrides]]\nignore = true\n' >"$OSVD/override/osv-scanner.toml"
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/override"
+never 'Filtered'
+
+# Адресное исключение уязвимости — тот же путь, только уже.
+osv_copy ignored-vuln
+printf '[[IgnoredVulns]]\nid = "GHSA-35jh-r3h4-6jhm"\nreason = "фикстура selftest"\n' \
+  >"$OSVD/ignored-vuln/osv-scanner.toml"
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/ignored-vuln"
+never 'Filtered'
+
+# Конфиг во вложенном каталоге: доверенный --config перекрывает локальные на всех уровнях.
+osv_copy nested
+mkdir -p "$OSVD/nested/sub"
+cp "$SRC_VUL/package-lock.json" "$OSVD/nested/sub/package-lock.json"
+printf '[[PackageOverrides]]\nignore = true\n' >"$OSVD/nested/sub/osv-scanner.toml"
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/nested"
+never 'Filtered'
+
+# Lock-файл, спрятанный проектом в .gitignore: без --no-ignore OSV его не читает и
+# у стадии не остаётся входа (проверено и без каталога .git, и с ним).
+osv_copy hidden
+printf 'package-lock.json\n' >"$OSVD/hidden/.gitignore"
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/hidden"
+saw 'Scanned /src/package-lock.json'
 
 # depscan: проверять было нечего — это отдельный исход, а не «чисто».
 expect 4 'НЕЧЕГО ПРОВЕРЯТЬ' -- sh "$HERE/depscan.sh" "$HERE/testdata/no-manifest"

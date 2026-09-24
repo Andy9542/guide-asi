@@ -131,7 +131,16 @@ echo; echo "=== OSV-Scanner ==="
 # Код 128 у OSV — это и «источников пакетов не найдено», и «lock-файл найден, но не
 # разобран». Различает их только строка `Error during extraction` в выводе: без неё
 # проверять было нечего (4), с ней сканер не отработал и вердикта нет (3).
-out=$(docker_run "$OSV_IMAGE" scan source --recursive /src 2>&1); OSV_RC=$?
+#
+# `--config` обязателен и указывает на файл в каталоге правил: без него OSV подхватывает
+# osv-scanner.toml рядом с lock-файлом, то есть проверяемый проект задаёт политику
+# собственной проверки — `[[PackageOverrides]] ignore = true` в его дереве возвращает
+# код 0 и «Filtered 1 ignored package/s». Явный конфиг перекрывает локальные на всех
+# уровнях вложенности. `--no-ignore` — по той же причине, что `--no-git-ignore` у
+# Semgrep: lock-файл, записанный проектом в .gitignore, иначе не читается вовсе
+# (проверено на 2.6.0 и без каталога .git, и с ним), и стадия остаётся без входа.
+out=$(docker_run "$OSV_IMAGE" scan source --recursive --no-ignore \
+  --config /rules/osv-scanner.toml /src 2>&1); OSV_RC=$?
 printf '%s\n' "$out"
 case "$OSV_RC" in
   128) case "$out" in
