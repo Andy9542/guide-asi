@@ -4,7 +4,7 @@
 #   sh selftest.sh    # 0 всё сошлось · 1 расхождение · 3 проверить не удалось
 #
 # В этот каталог и в ~/.promptfoo не пишет: выгрузки, база и логи promptfoo уходят в $TMP.
-# Сеть нужна один раз — скачать закреплённый promptfoo в ~/.npm/_npx (~2,6 ГБ).
+# Сеть нужна: закреплённый promptfoo (~2,6 ГБ) npx скачивает в ~/.npm/_npx один раз.
 set -u
 HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
@@ -30,7 +30,7 @@ saw()   { case "$out" in *"$1"*) printf 'ok     содержит «%s»\n' "$1" 
 never() { case "$out" in *"$1"*) FAILED=1; printf 'ПРОВАЛ есть «%s»\n' "$1" ;; *) printf 'ok     нет «%s»\n' "$1" ;; esac; }
 infra() { printf 'ИНФРА  %s\n' "$1"; exit 3; }
 
-# Версия promptfoo читается из run.sh, а не дублируется здесь: один пин на каталог.
+# Версию promptfoo selftest читает из run.sh: один пин на каталог.
 PIN=$(sed -n "s/^PROMPTFOO_VERSION='\(.*\)'$/\1/p" "$HERE/run.sh")
 
 command -v python3 >/dev/null 2>&1 || infra 'нет python3'
@@ -42,9 +42,9 @@ case "$PIN" in
   *) infra "в run.sh нет строки PROMPTFOO_VERSION='<версия>' — проверять нечего" ;;
 esac
 
-# Окружение выставляется только для этого прогона: телеметрия и проверка обновлений
-# выключены, пауза между повторами обнулена (иначе исход «шлюз погашен» приходит тот же,
-# но через ~85 с), база и кэш promptfoo уведены из ~/.promptfoo в $TMP.
+# selftest выставляет окружение только для своего прогона: выключает телеметрию и
+# проверку обновлений, обнуляет паузу между повторами (иначе исход «шлюз погашен»
+# приходит тот же, но через ~85 с), уводит базу и кэш promptfoo из ~/.promptfoo в $TMP.
 export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
        PROMPTFOO_REQUEST_BACKOFF_MS=0 PROMPTFOO_CONFIG_DIR="$TMP/promptfoo"
 
@@ -66,47 +66,47 @@ expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$HERE/testdata/echo-pass.
 expect 1 'REDTEAM_VERDICT=fail' -- env REDTEAM_CONFIG="$HERE/testdata/echo-fail.yaml" \
     REDTEAM_JSON="$TMP/fail.json" sh "$HERE/run.sh"
 
-# Конфиги вне поддержанного режима отклоняются ДО вызова promptfoo: код 3, INFRA, в
-# выводе нет «Writing output to», выгрузки по REDTEAM_JSON нет. Что именно и почему
-# отклоняется, рассказано в README («Поддержанный режим», «Профиль пробы») и в шапках
-# самих фикстур; здесь — только контракт отказа.
+# Конфиги вне поддержанного режима preflight отклоняет до вызова promptfoo: код 3, INFRA,
+# в выводе нет «Writing output to», выгрузки по REDTEAM_JSON нет. Что и почему он
+# отклоняет, рассказывает README («Поддержанный режим», «Профиль пробы»); selftest
+# проверяет только контракт отказа.
 rejected_before_run() {  # rejected_before_run <имя> <подстрока причины> <конфиг>
   expect 3 "$2" -- env REDTEAM_CONFIG="$3" REDTEAM_JSON="$TMP/$1.json" sh "$HERE/run.sh"
   saw 'REDTEAM_VERDICT=infra'
   never 'Writing output to'
   expect 1 '' -- test -e "$TMP/$1.json"
 }
-# Второй целевой провайдер: без отказа шесть строк на три пробы читались как полный набор.
+# Второй целевой провайдер: без отказа classify читал шесть строк на три пробы как полный набор.
 rejected_before_run unsupported 'ровно один целевой провайдер' "$HERE/testdata/echo-unsupported.yaml"
-# Готовый ответ в пробе: promptfoo подставляет его вместо вызова провайдера, ответ при
-# этом не кэшированный. Контроль пары — прогон по мёртвому шлюзу выше: без подстановки INFRA.
+# Готовый ответ в пробе: promptfoo подставляет его вместо вызова провайдера и не помечает
+# как кэшированный. Контроль: прогон по мёртвому шлюзу выше без подстановки даёт INFRA.
 rejected_before_run po 'providerOutput' "$HERE/testdata/provider-output.yaml"
 # Профиль проверок (IA-06, IA-07): пустая группа assert-set давала pass без единой
-# проверки, сорвавшаяся javascript — провал модели, а с порогом 0.5 — снова pass.
+# проверки, сорвавшаяся javascript читалась провалом модели, а с порогом 0.5 снова давала pass.
 rejected_before_run assert-set 'assert-set' "$HERE/testdata/assert-set-empty.yaml"
 rejected_before_run js 'javascript' "$HERE/testdata/javascript-crash.yaml"
 rejected_before_run js-threshold 'javascript' "$HERE/testdata/javascript-threshold.yaml"
 # Профиль пробы (IA-07 повторно): file:// у разрешённого contains исполняет код,
-# assertScoringFunction отдаёт решение пробы чужому коду. Отказ — по префиксу и по ключу,
-# до открытия файла: относительный путь в фикстурах на случай не влияет.
+# assertScoringFunction отдаёт решение пробы чужому коду. preflight отказывает по префиксу
+# и по ключу, не открывая файл, поэтому относительный путь в фикстурах на случай не влияет.
 rejected_before_run dynamic 'file://' "$HERE/testdata/dynamic-value.yaml"
 rejected_before_run scoring 'assertScoringFunction' "$HERE/testdata/scoring-function.yaml"
 
-# Контроль к обоим: тот же порог на ИСПРАВНЫХ проверках поддержан и вердикта не теряет.
-# Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5 — прогон идёт до конца.
+# Контроль к обоим: тот же порог на исправных проверках поддержан и вердикта не теряет.
+# Две contains, одна true и одна false, агрегат 0.50 ≥ 0.5, прогон идёт до конца.
 expect 0 'REDTEAM_VERDICT=pass' -- env REDTEAM_CONFIG="$HERE/testdata/echo-threshold.yaml" \
     REDTEAM_JSON="$TMP/threshold.json" sh "$HERE/run.sh"
 expect 0 'Aggregate score 0.50' -- grep -o 'Aggregate score 0.50' "$TMP/threshold.json"
 
 # Выгрузка удачного прогона, оставленная по пути публикации, не становится результатом
-# следующего: прогон отклонён, старый файл убран, вердикт — 3.
+# следующего: run.sh отклоняет прогон, убирает старый файл и выносит код 3.
 cp "$TMP/pass.json" "$TMP/stale.json" || infra 'нет выгрузки удачного прогона — проверять устаревание нечем'
 expect 3 'REDTEAM_VERDICT=infra' -- env REDTEAM_CONFIG="$HERE/testdata/echo-unsupported.yaml" \
     REDTEAM_JSON="$TMP/stale.json" sh "$HERE/run.sh"
 expect 1 '' -- test -e "$TMP/stale.json"
 
-# Ошибка записи результата — инфраструктурная, а не «пробы прошли». /dev/full есть не
-# везде (контейнеры без полного /dev), поэтому случай условный.
+# Ошибка записи результата даёт INFRA (код 3). /dev/full есть не везде (контейнеры без
+# полного /dev), поэтому случай условный.
 if [ -c /dev/full ]; then
   expect 3 'не удалось записать' -- env REDTEAM_CONFIG="$HERE/testdata/echo-pass.yaml" \
       REDTEAM_JSON=/dev/full sh "$HERE/run.sh"
