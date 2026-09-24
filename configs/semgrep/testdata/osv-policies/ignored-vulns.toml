@@ -1,0 +1,4 @@
+# Фикстура selftest: адресное исключение уязвимости lodash 4.17.20.
+[[IgnoredVulns]]
+id = "GHSA-35jh-r3h4-6jhm"
+reason = "фикстура selftest"

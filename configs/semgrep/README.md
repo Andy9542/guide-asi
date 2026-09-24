@@ -121,7 +121,7 @@ sh depscan.sh ./каталог-без-права-входа-или-чтения
 
 ```sh
 sh depscan.sh testdata/vulnerable-lock
-# 1 и «Total 1 package affected by 3 known vulnerabilities»: в lock-файле закреплён
+# 1 и «Total 1 package affected by N known vulnerabilities» (N растёт вместе с базой OSV): в lock-файле закреплён
 # lodash 4.17.20 — фикстура намеренная, см. «Что замерено»
 
 cp -r testdata/vulnerable-lock ./копия-с-исключением

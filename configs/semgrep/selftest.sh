@@ -99,15 +99,16 @@ osv_copy() {  # osv_copy <имя> — копия уязвимой фикстур
 
 # Исключение всего пакета: до доверенного --config здесь было 0 «ЧИСТО» и
 # «Filtered 1 ignored package/s».
+# Сами TOML-файлы лежат в testdata/osv-policies: их заголовки секций в тексте этого
+# скрипта эвристика башизмов из build/selftest.sh приняла бы за двойные скобки bash.
 osv_copy override
-printf '[[PackageOverrides]]\nignore = true\n' >"$OSVD/override/osv-scanner.toml"
+cp "$HERE/testdata/osv-policies/package-overrides.toml" "$OSVD/override/osv-scanner.toml"
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/override"
 never 'Filtered'
 
 # Адресное исключение уязвимости — тот же путь, только уже.
 osv_copy ignored-vuln
-printf '[[IgnoredVulns]]\nid = "GHSA-35jh-r3h4-6jhm"\nreason = "фикстура selftest"\n' \
-  >"$OSVD/ignored-vuln/osv-scanner.toml"
+cp "$HERE/testdata/osv-policies/ignored-vulns.toml" "$OSVD/ignored-vuln/osv-scanner.toml"
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/ignored-vuln"
 never 'Filtered'
 
@@ -115,9 +116,10 @@ never 'Filtered'
 osv_copy nested
 mkdir -p "$OSVD/nested/sub"
 cp "$SRC_VUL/package-lock.json" "$OSVD/nested/sub/package-lock.json"
-printf '[[PackageOverrides]]\nignore = true\n' >"$OSVD/nested/sub/osv-scanner.toml"
+cp "$HERE/testdata/osv-policies/package-overrides.toml" "$OSVD/nested/sub/osv-scanner.toml"
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/nested"
 never 'Filtered'
+saw 'Scanned /src/sub/package-lock.json'
 
 # Lock-файл, спрятанный проектом в .gitignore: без --no-ignore OSV его не читает и
 # у стадии не остаётся входа (проверено и без каталога .git, и с ним).
