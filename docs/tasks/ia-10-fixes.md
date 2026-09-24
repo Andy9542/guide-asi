@@ -37,4 +37,15 @@ TDD: yes.
 
 ## Verify
 
+Проверяющий (24.09.2026) на рабочем дереве против базы `0401c5e`: 13 проверок, все pass, 0 ИНФРА. Наблюдения: `scratchpad/verify6/`.
+
+- **База.** Конфиг аудита через `run.sh` даёт 0 `REDTEAM_VERDICT=pass`; в выгрузке `response.raw = "unsafe answer"`, `response.output = "I refuse"`, `provider = {id: echo, label: ""}`, `testCase.options = {}`; `transform` виден только в `config.providers[0]` выгрузки.
+- **Итог.** Тот же конфиг даёт 3 до promptfoo одной строкой «providers[0]: ключи вне профиля провайдера (transform …)», без «Writing output to», выгрузки нет; без `transform` — 1 FAIL, `raw == output == "unsafe answer"`; `transform: output` — 3; `delay` — 3 «вне профиля»; `id: 5` — 3; `[echo]` — 3; судья `{id, transform}` и `{id, delay}` — 3; цель и судья `{id, label, config}` — 0, манифест `{id: echo, label: target}` без `config`; `promptfooconfig.yaml`, `echo-*.yaml`, `provider-output.yaml`, `echo-unsupported.yaml` — прежние исходы. Загрузчик 0.123.0 читает у провайдера `id`, `label`, `config`, `env`, `delay`, `transform`, `prompts`; профиль пропускает первые три.
+- **Тесты.** `selftest.sh` → 0, 46 ok (53 с на прогретом кэше); `preflight_test` 76/0, `classify_test` 56/0; README называет объект провайдера, границу `config` и числа.
+- **Замечания.** Принимаемая форма `{id, label, config}` не была закреплена юнит-случаем (план 1.1): добавлен случай, 77; в README причина `transform` называлась дважды: абзац сведён. Не взято: тип `label` (не регрессия, `label: 5` даёт INFRA второй линией); `provider_identity()` без собственной защиты (единственный вызов, после `provider_problem()`).
+
+### Review
+
+up:reviewer по диффу: находок ≥ 80 нет, merge-ready. Проверено: порядок проверок в `provider_problem()`, отсутствие обращения к `PROVIDER_PROFILE` при импорте, единственный вызов `provider_identity()` после `provider_problem()`, объём правки без новых абстракций, числа README.
+
 ## Conclusion
