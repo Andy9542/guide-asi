@@ -121,19 +121,18 @@ sh depscan.sh ./каталог-без-права-входа-или-чтения
 
 ```sh
 sh depscan.sh testdata/vulnerable-lock
-# 1 и «Total 1 package affected by N known vulnerabilities» (N растёт вместе с базой OSV): в lock-файле закреплён
+# 1 и «Total 1 package affected by N known vulnerabilities»: в lock-файле закреплён
 # lodash 4.17.20 — фикстура намеренная, см. «Что замерено»
 
 cp -r testdata/vulnerable-lock ./копия-с-исключением
-printf '[[PackageOverrides]]\nignore = true\n' > ./копия-с-исключением/osv-scanner.toml
-sh depscan.sh ./копия-с-исключением
-# снова 1, и в выводе нет «Filtered»: доверенный --config перекрывает конфиг
-# проверяемого дерева, в том числе во вложенных каталогах. Без него тот же каталог
-# давал 0 «ЧИСТО» и «Filtered 1 ignored package/s»
-
+cp testdata/osv-policies/package-overrides.toml ./копия-с-исключением/osv-scanner.toml
 printf 'package-lock.json\n' > ./копия-с-исключением/.gitignore
 sh depscan.sh ./копия-с-исключением
-# 1 и «Scanned /src/package-lock.json»: с --no-ignore спрятанный lock всё равно читается
+# снова 1, в выводе нет «Filtered» и есть «Scanned /src/package-lock.json»: доверенный
+# --config перекрывает конфиг проверяемого дерева (и во вложенных каталогах), а
+# --no-ignore читает lock-файл, спрятанный в .gitignore. Без первого флага тот же
+# каталог давал 0 «ЧИСТО» и «Filtered 1 ignored package/s», без второго — 4 «НЕЧЕГО
+# ПРОВЕРЯТЬ»: lock-файл не читался вовсе
 ```
 
 Копию делать рядом с `depscan.sh`, а не в `/tmp`: docker из snap не видит `/tmp` хоста,
@@ -157,12 +156,12 @@ sh depscan.sh ./копия-с-исключением
 исход 1: root в контейнере файл дочитывает, и находка перекрывает неполноту, назвав её
 в строке вердикта («НАХОДКА … — неполно: каталог не прочитан»).
 `testdata/vulnerable-lock` (lock-файл v3 с lodash 4.17.20 и безобидный `index.js`) даёт 1
-и «known vulnerabilities»; четыре копии этой фикстуры, которыми проверяемое дерево
-отменяло бы собственную проверку, — `[[PackageOverrides]] ignore = true`,
-`[[IgnoredVulns]]` на GHSA-35jh-r3h4-6jhm, тот же конфиг во вложенном `sub/` и
-`package-lock.json` в `.gitignore` — тоже дают 1, и слова «Filtered» в выводе нет.
-Число уязвимостей не утверждается: база OSV растёт, утверждаются код возврата и
-отсутствие фильтрации. Про `.gitignore` проверено отдельно образом 2.6.0: без `--no-ignore`
+и «known vulnerabilities». Всё, чем проверяемое дерево отменяло бы собственную проверку,
+собрано в одну копию этой фикстуры: `[[PackageOverrides]] ignore = true` в корне,
+`[[IgnoredVulns]]` на GHSA-35jh-r3h4-6jhm во вложенном `sub/` с собственным lock-файлом и
+`package-lock.json` в `.gitignore` (политики — `testdata/osv-policies/`). Она тоже даёт 1,
+слова «Filtered» в выводе нет, оба lock-файла в «Scanned». Число уязвимостей не
+утверждается: база OSV растёт, утверждаются код возврата и отсутствие фильтрации. Про `.gitignore` проверено отдельно образом 2.6.0: без `--no-ignore`
 lock-файл из `.gitignore` не читается ни без каталога `.git`, ни с ним (код 128, «No
 package sources found»), с флагом — читается.
 Каждое из этих утверждений — строка в `selftest.sh`. При «ОТКЛОНЕНО» `depscan.sh` называет

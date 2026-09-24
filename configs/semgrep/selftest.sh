@@ -88,45 +88,24 @@ saw 'No issues found'
 expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$SRC_VUL"
 saw 'known vulnerabilities'
 
-# Дальше — четыре способа, которыми проверяемое дерево отменяло бы свою же проверку:
-# OSV читает osv-scanner.toml рядом с lock-файлом и .gitignore проекта. Политику
-# задаёт только доверенный osv-scanner.toml этого каталога, копии фикстуры собираются
-# в $OSVD, потому что менять testdata/ на ходу нельзя.
-osv_copy() {  # osv_copy <имя> — копия уязвимой фикстуры в $OSVD/<имя>
-  mkdir -p "$OSVD/$1" && cp "$SRC_VUL/package-lock.json" "$SRC_VUL/index.js" "$OSVD/$1/" ||
-    infra "не копируется фикстура в $OSVD/$1"
-}
-
-# Исключение всего пакета: до доверенного --config здесь было 0 «ЧИСТО» и
-# «Filtered 1 ignored package/s».
-# Сами TOML-файлы лежат в testdata/osv-policies: их заголовки секций в тексте этого
-# скрипта эвристика башизмов из build/selftest.sh приняла бы за двойные скобки bash.
-osv_copy override
-cp "$HERE/testdata/osv-policies/package-overrides.toml" "$OSVD/override/osv-scanner.toml"
-expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/override"
+# Всё, чем проверяемое дерево отменяло бы свою же проверку, — в одной копии фикстуры:
+# osv-scanner.toml с исключением пакета в корне, с исключением уязвимости во вложенном
+# каталоге (у него свой lock-файл) и .gitignore, прячущий lock-файл. Один прогон: до
+# доверенного --config корень давал «Filtered 1 ignored package/s», вложенный конфиг
+# фильтровал свой lock, а без --no-ignore lock-файл из .gitignore не читался вовсе
+# (проверено и без каталога .git, и с ним) — исход 4 вместо 1. Копия собирается в
+# $OSVD, потому что менять testdata/ на ходу нельзя.
+mkdir -p "$OSVD/policy/sub" &&
+  cp "$SRC_VUL/package-lock.json" "$SRC_VUL/index.js" "$OSVD/policy/" &&
+  cp "$SRC_VUL/package-lock.json" "$OSVD/policy/sub/" &&
+  cp "$HERE/testdata/osv-policies/package-overrides.toml" "$OSVD/policy/osv-scanner.toml" &&
+  cp "$HERE/testdata/osv-policies/ignored-vulns.toml" "$OSVD/policy/sub/osv-scanner.toml" &&
+  printf 'package-lock.json\n' >"$OSVD/policy/.gitignore" ||
+  infra "не собирается копия фикстуры в $OSVD/policy"
+expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/policy"
 never 'Filtered'
-
-# Адресное исключение уязвимости — тот же путь, только уже.
-osv_copy ignored-vuln
-cp "$HERE/testdata/osv-policies/ignored-vulns.toml" "$OSVD/ignored-vuln/osv-scanner.toml"
-expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/ignored-vuln"
-never 'Filtered'
-
-# Конфиг во вложенном каталоге: доверенный --config перекрывает локальные на всех уровнях.
-osv_copy nested
-mkdir -p "$OSVD/nested/sub"
-cp "$SRC_VUL/package-lock.json" "$OSVD/nested/sub/package-lock.json"
-cp "$HERE/testdata/osv-policies/package-overrides.toml" "$OSVD/nested/sub/osv-scanner.toml"
-expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/nested"
-never 'Filtered'
-saw 'Scanned /src/sub/package-lock.json'
-
-# Lock-файл, спрятанный проектом в .gitignore: без --no-ignore OSV его не читает и
-# у стадии не остаётся входа (проверено и без каталога .git, и с ним).
-osv_copy hidden
-printf 'package-lock.json\n' >"$OSVD/hidden/.gitignore"
-expect 1 'ОТКЛОНЕНО' -- sh "$HERE/depscan.sh" "$OSVD/hidden"
 saw 'Scanned /src/package-lock.json'
+saw 'Scanned /src/sub/package-lock.json'
 
 # depscan: проверять было нечего — это отдельный исход, а не «чисто».
 expect 4 'НЕЧЕГО ПРОВЕРЯТЬ' -- sh "$HERE/depscan.sh" "$HERE/testdata/no-manifest"
