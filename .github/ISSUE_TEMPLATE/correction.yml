@@ -1,0 +1,34 @@
+name: Correction or broken example / Ошибка или нерабочий пример
+description: Fix a claim, dated tool entry, link, or reproducible example / Исправить проверяемую ошибку
+title: "[correction] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English and Russian are welcome. Please remove secrets and personal data from logs.
+        Можно писать на русском. Удалите секреты и персональные данные из логов.
+  - type: input
+    id: location
+    attributes:
+      label: File and commit / Файл и коммит
+      placeholder: configs/opa/README.md at <commit>
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Expected and actual result / Ожидание и факт
+      description: Include the claim that needs correcting / Укажите исправляемое утверждение
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Source or reproduction / Источник или воспроизведение
+      description: Primary source, versions, commands, relevant output / Первоисточник, версии, команды, результат
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Suggested correction / Предлагаемое исправление

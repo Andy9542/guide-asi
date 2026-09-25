@@ -1,47 +1,64 @@
-# Как дополнить гайд
+# Contributing to Agent Defense Guide
 
-Самые полезные правки — по [пробелам](gaps.md). Там, где написано «не нашли», мы правда
-искали и не нашли, а не решили, что этого не существует.
+[Русский](CONTRIBUTING.ru.md) · [Overview](README.md)
 
-## Предложить инструмент
+Issues and pull requests are welcome in **English or Russian**. A small, well-supported
+correction is a useful contribution.
 
-Заведите issue по шаблону «Предложить инструмент». Он спрашивает ровно то, без чего
-инструмент нельзя поставить в таблицу:
+## Good first contributions
 
-1. **Ссылка на репозиторий.**
-2. **Лицензия** — SPDX-идентификатор, признак OSI и оговорка, если лицензия обязывает
-   к чему-то за пределами атрибуции (копилефт, запрет на управляемый сервис, платные
-   компоненты в релизных сборках). Человек упирается в лицензию раньше, чем в
-   функциональность, и мы уже спотыкались об это трижды.
-3. **Точка внедрения** — [какая из семи](README.md#точки-внедрения).
-4. **Какие риски ASI закрывает** и, отдельно, **чего не закрывает**. Второе важнее:
-   инструмент без границ применимости опаснее его отсутствия.
-5. **Метка**: вы это проверяли (`[стенд]`) или знаете по документации (`[дока]`)?
-   Честное `[дока]` лучше, чем щедрое `[стенд]`.
+- Reproduce one config example, including a legitimate control case. Record the commit,
+  tool versions, command, and observed result.
+- Correct one dated entry in [tools.csv](data/tools.csv) using a primary source and a new check date.
+- Translate one risk or control page into English. Keep the evidence labels, citations,
+  and limitations; open an issue first if you want to coordinate a longer translation.
+- Bring evidence for one of the [coverage gaps](gaps.md).
 
-## Что мы проверим перед тем, как взять
+## Suggest a tool
 
-Те же три порога, что и для всех остальных, — см. [README](README.md#как-отбирались-инструменты):
-установленная лицензия, активность за последние полгода, наличие эксплуатации.
-Результат проверки с датой попадает в [`data/tools.csv`](data/tools.csv).
+Use the [tool suggestion form](https://github.com/Andy9542/guide-asi/issues/new?template=tool-suggestion.yml).
+Include:
 
-Если инструмент порог не прошёл, он не исчезает — он уходит в
-[`data/rejected.csv`](data/rejected.csv) с причиной. Это тоже полезная информация:
-там, например, лежит инструмент, который в каталогах до сих пор числится
-production-ready, а его репозиторий уже архивирован.
+1. The repository and primary documentation.
+2. Its SPDX license, OSI status where known, and relevant obligations or commercial limitations.
+3. The [control point](README.md#control-points) where it belongs.
+4. The related ASI risks, measured coverage, and limitations.
+5. Whether your evidence is `[стенд]` (a recorded experiment) or `[дока]` (documentation).
 
-## Поправить наши данные
+The selection criteria are an identifiable license, recent activity, and evidence of
+adoption. See [how tools were selected](README.md#how-tools-were-selected). Record dates
+in the data; an excluded candidate belongs in [rejected.csv](data/rejected.csv) with its reason.
 
-Сигналы зрелости в `data/tools.csv` — со снимка на дату в поле `checked`. Они устаревают.
-Увидели расхождение — issue или PR, это ровно то, ради чего дата там и стоит.
+## Report an error or a broken example
 
-## Прислать разбор инцидента
+Use the [correction form](https://github.com/Andy9542/guide-asi/issues/new?template=correction.yml).
+Link the affected file and commit. Include the expected and actual behavior, a primary
+source or minimal reproduction, and the impact on the guide's claim. Remove credentials
+and personal data from logs.
 
-Нужен **первоисточник**: отчёт вендора, CVE, официальное уведомление, техническое
-исследование. Пересказ в блоге со ссылкой на другой пересказ мы не берём — не из
-снобизма, а потому что у нас уже был случай, когда так переехало неверное утверждение.
+For incidents, cite a vendor report, advisory, CVE record, or original technical research.
+Distinguish a demonstrated incident from a hypothesis or an attack class.
 
-## Тон
+## Evidence and wording
 
-Без «всегда», «единственный способ», «ни один фреймворк». Если утверждение не подпирается
-ссылкой или замером — так и напишите, это нормальная часть гайда.
+- Keep `[стенд]`, `[дока]`, and `[пробел]` distinct. A documentation claim does not become
+  a measured result because a tool was added to the table.
+- State what an experiment covers and which assumptions it needs.
+- Measure legitimate behavior as well as the attack where possible.
+- Explain limitations alongside capabilities. Avoid unsupported absolute claims.
+- Keep English and Russian landing pages consistent when changing shared facts.
+
+## Before opening a PR
+
+Run the local link check:
+
+```sh
+python3 build/check_links.py
+```
+
+For changes to an executable example, run its relevant tests and record the result.
+The full suite is `sh build/selftest.sh`; its prerequisites are in the
+[quickstart](docs/quickstart.md). Explicitly note any check you could not run.
+
+Keep changes focused. In the PR, explain the problem, resulting behavior, evidence,
+and limitations. Respect the existing [license split and attribution](NOTICE.md).
