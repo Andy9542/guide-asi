@@ -1,69 +1,74 @@
-name: Предложить инструмент
-description: Инструмент, который закрывает риск агентной системы, а мы его пропустили
-title: "[инструмент] "
-labels: ["инструмент"]
+name: Tool suggestion / Предложить инструмент
+description: Propose a control with evidence and limits / Контроль, доказательства и ограничения
+title: "[tool] "
 body:
   - type: markdown
     attributes:
       value: |
-        Спасибо. Заполните поля ниже — они ровно те, без которых инструмент нельзя
-        поставить в таблицу. Если чего-то не знаете, так и напишите: пустое поле честнее
-        догадки.
+        English and Russian are welcome. Include sources and limitations so we can evaluate the proposal.
+        Можно писать на русском. Нужны первоисточники и границы применимости.
   - type: input
     id: repo
     attributes:
-      label: Репозиторий
+      label: Repository / Репозиторий
       placeholder: https://github.com/org/name
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Primary documentation / Документация
+      description: Link the source that supports the claimed capability / Ссылка на подтверждение возможности
     validations:
       required: true
   - type: input
     id: license
     attributes:
-      label: Лицензия
-      description: SPDX-идентификатор. Если она обязывает к чему-то за пределами атрибуции — копилефт, запрет на управляемый сервис, платные компоненты в релизных сборках — напишите здесь же.
+      label: License and restrictions / Лицензия и ограничения
+      description: SPDX, OSI status if known, copyleft, paid features, model licenses / Укажите известные ограничения
       placeholder: Apache-2.0
     validations:
       required: true
   - type: dropdown
     id: point
     attributes:
-      label: Точка внедрения
+      label: Control point / Точка внедрения
       options:
-        - 01 · Шлюз вызовов модели
-        - 02 · Шлюз инструментов и MCP
-        - 03 · Цепочка поставок агента
-        - 04 · Песочница исполнения
-        - 05 · Идентичность агентов и шина
-        - 06 · Память и RAG
-        - 07 · Телеметрия и red-team
-        - Не подходит ни к одной — объясню ниже
+        - 01 · Model gateway / Шлюз модели
+        - 02 · Tool and MCP gateway / Шлюз инструментов
+        - 03 · Supply chain / Цепочка поставок
+        - 04 · Execution sandbox / Песочница
+        - 05 · Identity and bus / Идентичность и шина
+        - 06 · Memory and RAG / Память и RAG
+        - 07 · Telemetry and red teaming / Телеметрия и red-team
+        - Another point — explain below / Другое — поясните ниже
     validations:
       required: true
   - type: input
     id: risks
     attributes:
-      label: Какие риски ASI закрывает
+      label: Related risks / Связанные риски
       placeholder: ASI02, ASI03
     validations:
       required: true
   - type: textarea
     id: limits
     attributes:
-      label: Чего НЕ закрывает
-      description: Самое важное поле. Инструмент без границ применимости опаснее его отсутствия.
+      label: Capabilities and limits / Возможности и ограничения
+      description: What does it control, under which assumptions, and what remains uncovered?
     validations:
       required: true
   - type: dropdown
-    id: label
+    id: evidence_type
     attributes:
-      label: Метка
+      label: Evidence / Доказательность
       options:
-        - "[дока] — знаю по документации, сам не проверял"
-        - "[стенд] — проверял, могу рассказать что именно замерено"
+        - "[дока] Documentation only / По документации"
+        - "[стенд] Reproduced with recorded results / Есть собственный замер"
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
-      label: Если [стенд] — что именно замерено
-      description: Что запускали, на чём, какой был результат. Проверяли ли, что контроль пропускает легитимную нагрузку, а не только блокирует атаку.
+      label: Reproduction and date / Замер и дата
+      description: Versions, commands, results, and legitimate control cases / Версии, команды, результат и легитимный контроль

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+<title id="title">Agent Defense Guide</title><desc id="desc">From agent risks to controls you can verify. Open-source controls mapped to OWASP agentic risks. github.com/Andy9542/guide-asi.</desc>
+<defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#16303A" stroke-width="1"/></pattern></defs>
+<rect width="1280" height="640" fill="#0A171F"/>
+<rect x="820" width="460" height="640" fill="url(#grid)"/>
+<rect x="0" y="0" width="8" height="640" rx="4" fill="#8FF0D1"/>
+<g font-family="DejaVu Sans, sans-serif"><text x="60" y="67" fill="#8FF0D1" font-size="24" font-weight="700">AGENT DEFENSE GUIDE</text>
+<text x="56" y="195" fill="#F3F8F6" font-size="70" font-weight="700">From agent risks</text>
+<text x="56" y="280" fill="#F3F8F6" font-size="70" font-weight="700">to controls</text>
+<text x="56" y="365" fill="#8FF0D1" font-size="70" font-weight="700">you can verify.</text>
+<text x="61" y="427" fill="#B6CDD0" font-size="24">Open-source controls. Runnable examples. Explicit limits.</text>
+<path d="M60 478H1220" stroke="#2A444E"/>
+<text x="61" y="524" fill="#F3F8F6" font-size="20">7 control points</text>
+<text x="303" y="524" fill="#F3F8F6" font-size="20">10 OWASP risks</text>
+<text x="566" y="524" fill="#F3F8F6" font-size="20">6 config directories</text>
+<text x="60" y="595" fill="#8FF0D1" font-size="26">github.com/Andy9542/guide-asi</text>
+<text x="1216" y="595" fill="#B6CDD0" font-size="18" text-anchor="end">EN / RU</text><g transform="translate(1050 230) scale(1.05)" fill="none">
+  <circle r="136" stroke="#24414B"/>
+  <circle r="110" stroke="#24414B" stroke-dasharray="3 12"/>
+  <path d="M0 -82 L74 -50 V14 C74 61 39 88 0 107 C-39 88 -74 61 -74 14 V-50Z" fill="#102C33" stroke="#8FF0D1" stroke-width="3"/>
+  <path d="M-34 12 L-9 37 L38 -15" stroke="#8FF0D1" stroke-width="9" stroke-linecap="square" stroke-linejoin="miter"/>
+  <g stroke="#527B80" stroke-width="2"><path d="M-136 0 H-74 M74 0 H136 M0 -136 V-82 M0 107 V136"/></g>
+  <g fill="#8FF0D1"><circle cx="-136" r="5"/><circle cx="136" r="5"/><circle cy="-136" r="5"/></g>
+  <circle cy="136" r="5" fill="#F5B673"/>
+ </g></g></svg>
